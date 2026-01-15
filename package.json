@@ -1,0 +1,16 @@
+{
+  "name": "audible-library-creator",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.29",
+    "esbuild": "^0.27.2",
+    "obsidian": "^1.11.4",
+    "typescript": "^5.9.3"
+  }
+}
+

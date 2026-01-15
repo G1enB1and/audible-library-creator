@@ -1,0 +1,11 @@
+{
+  "id": "audible-library-creator",
+  "name": "Audible Library Creator",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Create book, author, and series notes in your vault by scraping Audible URLs.",
+  "author": "Glen Bland (Waypoint Labs)",
+  "authorUrl": "https://waypointlabs.org/projects/obsidian-plugins/audible-library-creator.html",
+  "fundingUrl": "https://waypointlabs.org/projects/obsidian-plugins/audible-library-creator/donate.html",
+  "isDesktopOnly": true
+}

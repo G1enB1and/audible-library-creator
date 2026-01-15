@@ -1,0 +1,17 @@
+{
+  "booksRoot": "Books",
+  "templatePath": "Templates/BookTemplate.md",
+  "defaultAcquired": "Owned",
+  "defaultSource": "Audible",
+  "defaultStatus": "",
+  "defaultRating": "⭐⭐⭐",
+  "baseTags": [
+    "Book",
+    "Audible"
+  ],
+  "adultFantasyTags": [
+    "Adult",
+    "Fantasy",
+    "Erotic"
+  ]
+}
