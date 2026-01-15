@@ -22,3 +22,7 @@ Thumbs.db
 
 # Obsidian junk (just in case)
 .obsidian/
+
+# environment
+.env
+.env.*
