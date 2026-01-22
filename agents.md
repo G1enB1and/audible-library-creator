@@ -159,3 +159,5 @@ DEFINITION OF DONE (FOR EACH CHANGE)
 - Command produces correct book note for test URLs.
 - YAML valid, tags clean, series/author URLs correct.
 - Works in Obsidian desktop with plugin reload.
+
+Also read: implementation_plan.md (source of truth for upcoming work)
