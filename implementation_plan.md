@@ -19,7 +19,7 @@ This plan is designed for agent-assisted implementation (Codex CLI / Antigravity
 ### Files of interest
 - main.ts: command, scrape, render, write, open file behavior (some features may not be wired yet)
 - settings.ts: settings UI + defaults + helpers
-- BookTemplate.md: dev template (not necessarily shipped as default template for all users)
+- BookTemplate.md: dev template
 
 ### Settings already defined in code (settings.ts)
 Paths & Templates
@@ -137,11 +137,11 @@ Render modes:
   - full: "⭐"
   - half: "½" appended OR alternate safe half marker (document it)
   - example 3.5 → "⭐⭐⭐½"
-- ratingStyle = "classic"
+- ratingStyle = "classic" (default)
   - full: "★"
-  - half: "⯪" or "½" (choose one consistently)
-  - empty: "✰" (optional)
-  - example 3.5 → "★★★⯪"
+  - half: "⯪"
+  - empty: "✰" 
+  - example 3.5 → "★★★⯪✰"
 
 Important:
 - YAML should be stable (number), not emoji. Emoji rendering should be done in template/dataview or by writing an extra field.
@@ -168,6 +168,7 @@ Tasks:
 - Define author note naming convention:
   - "Author - {Author Name}" OR "{Author Name}" under authorsFolder
   - Decide and keep consistent
+  - Add narrator (currently implementation does not scrape for Narrated By yet)
 - When creating a book:
   - determine author name + audible author URL
   - compute author note path
