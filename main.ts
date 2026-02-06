@@ -426,11 +426,11 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
 
   if ("title" in data) {
     // Book Data
-    const d = data as BookData;
-    const authorsPlain = d.authors.map(a => a.name).filter(Boolean).join(", ");
-    const authorsMd = d.authors.length
-      ? d.authors.map(a => a.url ? `[${a.name}](${cleanUrl(a.url)})` : a.name).join(",  \n")
-      : "_Unknown_";
+    const d = data as any; // Cast as any to access local overrides
+    const authorsPlain = d.authors.map((a: any) => a.name).filter(Boolean).join(", ");
+    const authorsMd = d.authors_md_override ?? (d.authors.length
+      ? d.authors.map((a: any) => a.url ? `[${a.name}](${cleanUrl(a.url)})` : a.name).join(",  \n")
+      : "_Unknown_");
 
     const seriesPlain = d.series?.name ?? "";
     const seriesMd = d.series
@@ -438,8 +438,8 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
       : "";
     const bookMd = d.series?.book ?? "";
 
-    const tagsMd = d.tags.map(t => `#${t}`).join(" ");
-    const tagsYaml = "[" + d.tags.map(t => JSON.stringify(t)).join(",") + "]";
+    const tagsMd = d.tags.map((t: any) => `#${t}`).join(" ");
+    const tagsYaml = "[" + d.tags.map((t: any) => JSON.stringify(t)).join(",") + "]";
 
     rep("{{title}}", d.title ?? "");
     rep("{{cover_url}}", cleanUrl(d.coverUrl ?? ""));
@@ -574,6 +574,8 @@ class CreateBookModal extends Modal {
   libraryId = "";
   status = "";
   rating = "";
+  overwriteOverride = false;
+  createAuthorPage = false;
 
   constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
     super(app);
@@ -626,6 +628,23 @@ class CreateBookModal extends Modal {
       });
 
     new Setting(contentEl)
+      .setName("Overwrite Existing Book")
+      .addToggle(tg => {
+        tg.setValue(this.overwriteOverride)
+          .onChange(v => (this.overwriteOverride = v));
+      });
+
+    if (this.plugin.settings.authorTemplatePath) {
+      new Setting(contentEl)
+        .setName("Create Author's Page")
+        .setDesc("Automatically create or update the author's reference page.")
+        .addToggle(tg => {
+          tg.setValue(this.createAuthorPage)
+            .onChange(v => (this.createAuthorPage = v));
+        });
+    }
+
+    new Setting(contentEl)
       .addButton(btn => {
         btn.setButtonText("Create")
           .setCta()
@@ -647,7 +666,7 @@ class CreateBookModal extends Modal {
                 await this.plugin.saveSettings();
               }
 
-              await this.plugin.createBookFromAudible(this.url, library, this.status, this.rating);
+              await this.plugin.createBookFromAudible(this.url, library, this.status, this.rating, this.overwriteOverride, this.createAuthorPage);
               this.close();
             } catch (e: any) {
               console.error(e);
@@ -781,7 +800,14 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  async createBookFromAudible(url: string, library: LibrarySettings, statusOverride?: string, ratingOverride?: string) {
+  async createBookFromAudible(
+    url: string,
+    library: LibrarySettings,
+    statusOverride?: string,
+    ratingOverride?: string,
+    overwriteOverride?: boolean,
+    createAuthorPage?: boolean
+  ) {
     const s = this.settings;
     const booksRoot = safeNormalizePath(library.booksRoot);
 
@@ -795,14 +821,28 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
 
     const data = await scrapeAudible(url, library, s, statusOverride, ratingOverride);
 
+    // Automatic Author Page Creation
+    if (createAuthorPage && s.authorTemplatePath && data.authors?.length) {
+      for (const author of data.authors) {
+        if (author.url) {
+          const authorUrl = author.url.startsWith("http") ? author.url : `https://www.audible.com${author.url}`;
+          await this.createAuthorFromAudible(authorUrl, library);
+        }
+      }
+      // Change links to internal Obsidian links for the book note
+      (data as any).authors_md_override = data.authors.map(a => `[[${a.name}]]`).join(",  \n");
+    }
+
     const tpl = await readTemplate(this.app, s.bookTemplatePath);
     const md = renderFromTemplate(tpl, data);
 
     const filePath = safeNormalizePath(`${booksRoot}/${data.title}.md`);
 
     const existing = this.app.vault.getAbstractFileByPath(filePath);
+    const shouldOverwrite = overwriteOverride ?? s.overwriteIfExists;
+
     if (existing && existing instanceof TFile) {
-      if (!s.overwriteIfExists) {
+      if (!shouldOverwrite) {
         new Notice(`File exists: ${filePath}`);
         if (s.openCreatedFile) {
           await this.app.workspace.getLeaf(false).openFile(existing);

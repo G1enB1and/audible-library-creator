@@ -40,7 +40,6 @@ export interface AudibleLibraryCreatorSettings {
   allowHalfStars: boolean;
 
   // Features
-  createSeriesPages: boolean;
 
   openCreatedFile: boolean;
   overwriteIfExists: boolean;
@@ -76,7 +75,6 @@ export const DEFAULT_SETTINGS: AudibleLibraryCreatorSettings = {
   ratingStyle: "classic",
   allowHalfStars: true,
 
-  createSeriesPages: false,
 
   openCreatedFile: true,
   overwriteIfExists: false,
@@ -227,8 +225,8 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
     };
 
     addTemplatePath("Book template path", "Template for book notes.", "bookTemplatePath");
-    addTemplatePath("Author template path", "Template for author notes (optional).", "authorTemplatePath");
-    addTemplatePath("Series template path", "Template for series notes (optional).", "seriesTemplatePath");
+    addTemplatePath("Author template path", "Template for Author Notes (Leave blank to disable Author Pages).", "authorTemplatePath");
+    addTemplatePath("Series template path", "Template for Series Notes (Leave blank to disable Series Pages).", "seriesTemplatePath");
     addTemplatePath("Archive template path", "Template for archive notes (optional).", "archiveTemplatePath");
 
     root.createEl("h3", { text: "Libraries" });
@@ -428,16 +426,6 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
 
     const s = this.plugin.settings;
 
-    new Setting(root)
-      .setName("Create series pages")
-      .setDesc("Optional, not implemented yet (placeholder).")
-      .addToggle(tg => {
-        tg.setValue(s.createSeriesPages);
-        tg.onChange(async v => {
-          this.plugin.settings.createSeriesPages = v;
-          await this.plugin.saveSettings();
-        });
-      });
 
     root.createEl("h4", { text: "Creation behavior" });
 
