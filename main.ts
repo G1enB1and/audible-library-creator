@@ -458,7 +458,13 @@ function renderFromTemplate(tpl: string, data: BookData): string {
 }
 
 // -------------------- scrape book (main) --------------------
-async function scrapeAudible(url: string, library: LibrarySettings, settings: AudibleLibraryCreatorSettings): Promise<BookData> {
+async function scrapeAudible(
+  url: string,
+  library: LibrarySettings,
+  settings: AudibleLibraryCreatorSettings,
+  statusOverride?: string,
+  ratingOverride?: string
+): Promise<BookData> {
   const resp = await requestUrl({ url, headers: { "Accept-Language": "en-US,en;q=0.9" } });
   const html = resp.text;
 
@@ -497,10 +503,10 @@ async function scrapeAudible(url: string, library: LibrarySettings, settings: Au
     series,
     description,
     category: library.name,
-    status: settings.defaultStatus,
+    status: statusOverride ?? settings.defaultStatus,
     acquired: settings.defaultAcquired,
     source: settings.defaultSource,
-    rating: String(settings.defaultRatingNumber),
+    rating: ratingOverride ?? String(settings.defaultRatingNumber),
     tags,
     type: "book"
   };
@@ -513,11 +519,15 @@ class CreateBookModal extends Modal {
   plugin: AudibleLibraryCreatorPlugin;
   url = "";
   libraryId = "";
+  status = "";
+  rating = "";
 
   constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
     super(app);
     this.plugin = plugin;
     this.libraryId = plugin.settings.activeLibraryId;
+    this.status = plugin.settings.defaultStatus;
+    this.rating = String(plugin.settings.defaultRatingNumber);
   }
 
   async onOpen() {
@@ -546,6 +556,23 @@ class CreateBookModal extends Modal {
       });
 
     new Setting(contentEl)
+      .setName("Status")
+      .addText(t => {
+        t.setValue(this.status)
+          .onChange(v => (this.status = v.trim()));
+        t.inputEl.style.width = "100%";
+      });
+
+    new Setting(contentEl)
+      .setName("Rating")
+      .setDesc("Numeric rating (e.g. 3 or 4.5)")
+      .addText(t => {
+        t.setValue(this.rating)
+          .onChange(v => (this.rating = v.trim()));
+        t.inputEl.style.width = "100%";
+      });
+
+    new Setting(contentEl)
       .addButton(btn => {
         btn.setButtonText("Create")
           .setCta()
@@ -567,7 +594,7 @@ class CreateBookModal extends Modal {
                 await this.plugin.saveSettings();
               }
 
-              await this.plugin.createBookFromAudible(this.url, library);
+              await this.plugin.createBookFromAudible(this.url, library, this.status, this.rating);
               this.close();
             } catch (e: any) {
               console.error(e);
@@ -615,7 +642,7 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  async createBookFromAudible(url: string, library: LibrarySettings) {
+  async createBookFromAudible(url: string, library: LibrarySettings, statusOverride?: string, ratingOverride?: string) {
     const s = this.settings;
     const booksRoot = safeNormalizePath(library.booksRoot);
 
@@ -627,7 +654,7 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
 
     new Notice("Fetching Audible page…");
 
-    const data = await scrapeAudible(url, library, s);
+    const data = await scrapeAudible(url, library, s, statusOverride, ratingOverride);
 
     const tpl = await readTemplate(this.app, s.bookTemplatePath);
     const md = renderFromTemplate(tpl, data);
