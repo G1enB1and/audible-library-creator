@@ -1,0 +1,34 @@
+{
+  "booksRoot": "Library",
+  "authorsFolder": "Library/Authors",
+  "seriesFolder": "Library/Series",
+  "archiveFolder": "Library/Archive",
+  "bookTemplatePath": "ObsidianFiles/Templates/book-template.md",
+  "authorTemplatePath": "ObsidianFiles/Templates/author-template.md",
+  "seriesTemplatePath": "ObsidianFiles/Templates/series-template.md",
+  "archiveTemplatePath": "ObsidianFiles/Templates/archive-template.md",
+  "defaultCategory": "Fiction",
+  "defaultStatus": "",
+  "defaultAcquired": "Owned",
+  "defaultSource": "Audible",
+  "defaultRatingNumber": 3,
+  "ratingStyle": "classic",
+  "allowHalfStars": true,
+  "separateCategoriesIntoSubfolders": true,
+  "createArchivesPerSubfolder": true,
+  "createSeriesPages": false,
+  "openCreatedFile": false,
+  "overwriteIfExists": true,
+  "tagRulesJson": "{\n  \"baseTags\": [\n    \"Book\",\n    \"Audible\"\n  ],\n  \"categoryTags\": {\n    \"Adult Fantasy\": [\n      \"Adult\",\n      \"Fantasy\",\n      \"Erotic\"\n    ]\n  }\n}",
+  "templatePath": "Templates/BookTemplate.md",
+  "defaultRating": "⭐⭐⭐",
+  "baseTags": [
+    "Book",
+    "Audible"
+  ],
+  "adultFantasyTags": [
+    "Adult",
+    "Fantasy",
+    "Erotic"
+  ]
+}

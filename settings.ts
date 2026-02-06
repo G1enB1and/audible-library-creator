@@ -8,17 +8,25 @@ export interface TagRules {
   categoryTags: Record<string, string[]>;
 }
 
-export interface AudibleLibraryCreatorSettings {
-  // Paths and templates (vault-relative)
+export interface LibrarySettings {
+  id: string;
+  name: string;
   booksRoot: string;
   authorsFolder: string;
   seriesFolder: string;
-  archiveFolder: string;
+  archivePath: string;
+}
 
+export interface AudibleLibraryCreatorSettings {
+  // Global templates (vault-relative)
   bookTemplatePath: string;
   authorTemplatePath: string;
   seriesTemplatePath: string;
   archiveTemplatePath: string;
+
+  // Libraries
+  libraries: LibrarySettings[];
+  activeLibraryId: string;
 
   // Defaults
   defaultCategory: string;
@@ -32,8 +40,6 @@ export interface AudibleLibraryCreatorSettings {
   allowHalfStars: boolean;
 
   // Features
-  separateCategoriesIntoSubfolders: boolean;
-  createArchivesPerSubfolder: boolean;
   createSeriesPages: boolean;
 
   openCreatedFile: boolean;
@@ -44,15 +50,22 @@ export interface AudibleLibraryCreatorSettings {
 }
 
 export const DEFAULT_SETTINGS: AudibleLibraryCreatorSettings = {
-  booksRoot: "Books",
-  authorsFolder: "Books/Authors",
-  seriesFolder: "Books/Series",
-  archiveFolder: "Books/Archive",
-
   bookTemplatePath: "Templates/BookTemplate.md",
   authorTemplatePath: "Templates/AuthorTemplate.md",
   seriesTemplatePath: "Templates/SeriesTemplate.md",
   archiveTemplatePath: "Templates/ArchiveTemplate.md",
+
+  libraries: [
+    {
+      id: "default",
+      name: "Main Library",
+      booksRoot: "Books",
+      authorsFolder: "Books/Authors",
+      seriesFolder: "Books/Series",
+      archivePath: "Books/Archive/!Archive.md"
+    }
+  ],
+  activeLibraryId: "default",
 
   defaultCategory: "Fiction",
   defaultStatus: "",
@@ -63,8 +76,6 @@ export const DEFAULT_SETTINGS: AudibleLibraryCreatorSettings = {
   ratingStyle: "emoji",
   allowHalfStars: true,
 
-  separateCategoriesIntoSubfolders: true,
-  createArchivesPerSubfolder: false,
   createSeriesPages: false,
 
   openCreatedFile: true,
@@ -192,11 +203,11 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
   }
 
   private renderPaths(root: HTMLElement) {
-    root.createEl("h3", { text: "Paths & Templates" });
+    root.createEl("h3", { text: "Templates" });
 
     const s = this.plugin.settings;
 
-    const addPath = (
+    const addTemplatePath = (
       name: string,
       desc: string,
       key: keyof AudibleLibraryCreatorSettings
@@ -205,7 +216,7 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
         .setName(name)
         .setDesc(desc)
         .addText(t => {
-          t.setPlaceholder("Vault-relative path");
+          t.setPlaceholder("Templates/MyTemplate.md");
           t.setValue(String(s[key] || ""));
           t.onChange(async v => {
             // @ts-ignore
@@ -215,15 +226,112 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
         });
     };
 
-    addPath("Books root folder", "Where book notes are created (ex: Books).", "booksRoot");
-    addPath("Authors folder", "Where author notes are created (ex: Books/Authors).", "authorsFolder");
-    addPath("Series folder", "Where series notes are created (ex: Books/Series).", "seriesFolder");
-    addPath("Archive folder", "Where archive notes are created (ex: Books/Archive).", "archiveFolder");
+    addTemplatePath("Book template path", "Template for book notes.", "bookTemplatePath");
+    addTemplatePath("Author template path", "Template for author notes (optional).", "authorTemplatePath");
+    addTemplatePath("Series template path", "Template for series notes (optional).", "seriesTemplatePath");
+    addTemplatePath("Archive template path", "Template for archive notes (optional).", "archiveTemplatePath");
 
-    addPath("Book template path", "Template for book notes.", "bookTemplatePath");
-    addPath("Author template path", "Template for author notes (optional for now).", "authorTemplatePath");
-    addPath("Series template path", "Template for series notes (optional for now).", "seriesTemplatePath");
-    addPath("Archive template path", "Template for archive notes (optional for now).", "archiveTemplatePath");
+    root.createEl("h3", { text: "Libraries" });
+    root.createEl("p", { text: "Configure separate paths for different categories/genres. Each library has its own folders for books, authors, and series, and its own archive file." });
+
+    s.libraries.forEach((lib, index) => {
+      const libContainer = root.createDiv({ cls: "alc-library-item" });
+      libContainer.style.border = "1px solid var(--background-modifier-border)";
+      libContainer.style.padding = "10px";
+      libContainer.style.marginBottom = "10px";
+      libContainer.style.borderRadius = "8px";
+
+      new Setting(libContainer)
+        .setName(`Library: ${lib.name}`)
+        .addExtraButton(cb => {
+          cb.setIcon("trash")
+            .setTooltip("Delete this library")
+            .onClick(async () => {
+              if (s.libraries.length <= 1) {
+                // @ts-ignore
+                new Notice("You must have at least one library.");
+                return;
+              }
+              s.libraries.splice(index, 1);
+              if (s.activeLibraryId === lib.id) {
+                s.activeLibraryId = s.libraries[0].id;
+              }
+              await this.plugin.saveSettings();
+              this.display();
+            });
+        });
+
+      new Setting(libContainer)
+        .setName("Library name")
+        .addText(t => {
+          t.setValue(lib.name);
+          t.onChange(async v => {
+            lib.name = v.trim();
+            await this.plugin.saveSettings();
+          });
+        });
+
+      new Setting(libContainer)
+        .setName("Books root")
+        .setDesc("Where book notes are created.")
+        .addText(t => {
+          t.setValue(lib.booksRoot);
+          t.onChange(async v => {
+            lib.booksRoot = safeNormalizePath(v);
+            await this.plugin.saveSettings();
+          });
+        });
+
+      new Setting(libContainer)
+        .setName("Authors folder")
+        .addText(t => {
+          t.setValue(lib.authorsFolder);
+          t.onChange(async v => {
+            lib.authorsFolder = safeNormalizePath(v);
+            await this.plugin.saveSettings();
+          });
+        });
+
+      new Setting(libContainer)
+        .setName("Series folder")
+        .addText(t => {
+          t.setValue(lib.seriesFolder);
+          t.onChange(async v => {
+            lib.seriesFolder = safeNormalizePath(v);
+            await this.plugin.saveSettings();
+          });
+        });
+
+      new Setting(libContainer)
+        .setName("Archive path")
+        .setDesc("Path to the archive .md file.")
+        .addText(t => {
+          t.setValue(lib.archivePath);
+          t.onChange(async v => {
+            lib.archivePath = safeNormalizePath(v);
+            await this.plugin.saveSettings();
+          });
+        });
+    });
+
+    new Setting(root)
+      .addButton(btn => {
+        btn.setButtonText("Add Library")
+          .setCta()
+          .onClick(async () => {
+            const nextId = "lib-" + Date.now();
+            s.libraries.push({
+              id: nextId,
+              name: "New Library",
+              booksRoot: "Books/New",
+              authorsFolder: "Books/New/Authors",
+              seriesFolder: "Books/New/Series",
+              archivePath: "Books/New/!Archive.md"
+            });
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
   }
 
   private renderDefaults(root: HTMLElement) {
@@ -319,28 +427,6 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
     root.createEl("h3", { text: "Features" });
 
     const s = this.plugin.settings;
-
-    new Setting(root)
-      .setName("Separate categories into subfolders")
-      .setDesc("Allows categories like Helpful Informative/Finance.")
-      .addToggle(tg => {
-        tg.setValue(s.separateCategoriesIntoSubfolders);
-        tg.onChange(async v => {
-          this.plugin.settings.separateCategoriesIntoSubfolders = v;
-          await this.plugin.saveSettings();
-        });
-      });
-
-    new Setting(root)
-      .setName("Create archives per subfolder")
-      .setDesc("Optional, not implemented yet (placeholder).")
-      .addToggle(tg => {
-        tg.setValue(s.createArchivesPerSubfolder);
-        tg.onChange(async v => {
-          this.plugin.settings.createArchivesPerSubfolder = v;
-          await this.plugin.saveSettings();
-        });
-      });
 
     new Setting(root)
       .setName("Create series pages")

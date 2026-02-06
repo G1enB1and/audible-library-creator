@@ -1,34 +1,36 @@
 {
-  "booksRoot": "Books",
-  "authorsFolder": "Books/Authors",
-  "seriesFolder": "Books/Series",
-  "archiveFolder": "Books/Archive",
-  "bookTemplatePath": "Templates/BookTemplate.md",
-  "authorTemplatePath": "Templates/AuthorTemplate.md",
-  "seriesTemplatePath": "Templates/SeriesTemplate.md",
-  "archiveTemplatePath": "Templates/ArchiveTemplate.md",
+  "bookTemplatePath": "ObsidianFiles/Templates/library-templates/book-template.md",
+  "authorTemplatePath": "ObsidianFiles/Templates/library-templates-author-template.md",
+  "seriesTemplatePath": "ObsidianFiles/Templates/library-templates/series-template.md",
+  "archiveTemplatePath": "ObsidianFiles/Templates/library-templates/archive-template.md",
+  "libraries": [
+    {
+      "id": "default",
+      "name": "Fiction",
+      "booksRoot": "Library/Categories/Fiction/Fiction Books",
+      "authorsFolder": "Library/Categories/Fiction/Fiction Authors",
+      "seriesFolder": "Library/Categories/Fiction/Fiction Series",
+      "archivePath": "Library/Categories/Fiction/!Fiction Archive.md"
+    },
+    {
+      "id": "lib-1770399942121",
+      "name": "Adult Fantasy",
+      "booksRoot": "Library/Categories/Adult Fantasy/Adult Fantasy Books",
+      "authorsFolder": "Library/Categories/Adult Fantasy/Adult Fantasy Authors",
+      "seriesFolder": "Library/Categories/Adult Fantasy/Adult Fantasy Series",
+      "archivePath": "Library/Categories/Fiction/!Adult Fantasy Archive.md"
+    }
+  ],
+  "activeLibraryId": "lib-1770399942121",
   "defaultCategory": "Fiction",
   "defaultStatus": "",
   "defaultAcquired": "Owned",
   "defaultSource": "Audible",
   "defaultRatingNumber": 3,
-  "ratingStyle": "classic",
+  "ratingStyle": "emoji",
   "allowHalfStars": true,
-  "separateCategoriesIntoSubfolders": true,
-  "createArchivesPerSubfolder": false,
   "createSeriesPages": false,
   "openCreatedFile": false,
   "overwriteIfExists": true,
-  "tagRulesJson": "{\n  \"baseTags\": [\n    \"Book\",\n    \"Audible\"\n  ],\n  \"categoryTags\": {\n    \"Adult Fantasy\": [\n      \"Adult\",\n      \"Fantasy\",\n      \"Erotic\"\n    ]\n  }\n}",
-  "templatePath": "Templates/BookTemplate.md",
-  "defaultRating": "⭐⭐⭐",
-  "baseTags": [
-    "Book",
-    "Audible"
-  ],
-  "adultFantasyTags": [
-    "Adult",
-    "Fantasy",
-    "Erotic"
-  ]
+  "tagRulesJson": "{\n  \"baseTags\": [\n    \"Book\",\n    \"Audible\"\n  ],\n  \"categoryTags\": {\n    \"Adult Fantasy\": [\n      \"Adult\",\n      \"Fantasy\",\n      \"Erotic\"\n    ]\n  }\n}"
 }

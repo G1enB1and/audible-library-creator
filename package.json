@@ -1,6 +1,6 @@
 {
   "name": "audible-library-creator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "main.js",
   "scripts": {
     "build": "node esbuild.config.mjs production",
@@ -13,4 +13,3 @@
     "typescript": "^5.9.3"
   }
 }
-

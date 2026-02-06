@@ -12,7 +12,8 @@ import {
   AudibleLibraryCreatorSettings,
   DEFAULT_SETTINGS,
   AudibleLibraryCreatorSettingTab,
-  safeNormalizePath
+  safeNormalizePath,
+  LibrarySettings
 } from "./settings";
 
 
@@ -457,7 +458,7 @@ function renderFromTemplate(tpl: string, data: BookData): string {
 }
 
 // -------------------- scrape book (main) --------------------
-async function scrapeAudible(url: string, categoryFolder: string, settings: AudibleLibraryCreatorSettings): Promise<BookData> {
+async function scrapeAudible(url: string, library: LibrarySettings, settings: AudibleLibraryCreatorSettings): Promise<BookData> {
   const resp = await requestUrl({ url, headers: { "Accept-Language": "en-US,en;q=0.9" } });
   const html = resp.text;
 
@@ -480,7 +481,8 @@ async function scrapeAudible(url: string, categoryFolder: string, settings: Audi
   tags.push(...(tagRules.baseTags || []));
   tags.push(...scrapeTags(doc, jsonld));
 
-  const categoryTags = tagRules.categoryTags?.[categoryFolder];
+  // Per-library tags can still use the library name as a key in tagRules
+  const categoryTags = tagRules.categoryTags?.[library.name];
   if (categoryTags && Array.isArray(categoryTags)) {
     tags.push(...categoryTags);
   }
@@ -494,7 +496,7 @@ async function scrapeAudible(url: string, categoryFolder: string, settings: Audi
     authors,
     series,
     description,
-    category: categoryFolder,
+    category: library.name,
     status: settings.defaultStatus,
     acquired: settings.defaultAcquired,
     source: settings.defaultSource,
@@ -505,36 +507,23 @@ async function scrapeAudible(url: string, categoryFolder: string, settings: Audi
 }
 
 
-// -------------------- categories --------------------
-async function listBookCategories(app: App, booksRoot: string): Promise<string[]> {
-  const root = app.vault.getAbstractFileByPath(booksRoot);
-  // @ts-ignore
-  const children = (root && "children" in root) ? (root.children as any[]) : [];
-  const folders = children
-    .filter(c => c && c.path && c.path.startsWith(booksRoot + "/") && c.children)
-    .map(c => c.path.split("/").pop() as string);
-
-  return folders.sort((a, b) => a.localeCompare(b));
-}
 
 // -------------------- modal --------------------
 class CreateBookModal extends Modal {
-  plugin: AudibleBookCreatorPlugin;
+  plugin: AudibleLibraryCreatorPlugin;
   url = "";
-  category = "";
-  newCategory = "";
+  libraryId = "";
 
-  constructor(app: App, plugin: AudibleBookCreatorPlugin) {
+  constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
     super(app);
     this.plugin = plugin;
+    this.libraryId = plugin.settings.activeLibraryId;
   }
 
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl("h2", { text: "Create Book from Audible" });
-
-    const categories = await listBookCategories(this.app, this.plugin.settings.booksRoot);
 
     new Setting(contentEl)
       .setName("Audible URL")
@@ -546,21 +535,14 @@ class CreateBookModal extends Modal {
       });
 
     new Setting(contentEl)
-      .setName("Category / Folder")
-      .setDesc("Where under Books/ should this note be created?")
+      .setName("Library")
+      .setDesc("Select the target library for this book.")
       .addDropdown(d => {
-        d.addOption("", "— Select —");
-        categories.forEach(c => d.addOption(c, c));
-        d.onChange(v => (this.category = v));
-      });
-
-    new Setting(contentEl)
-      .setName("New category (optional)")
-      .setDesc("If you type a new one here, it will be created and used.")
-      .addText(t => {
-        t.setPlaceholder("e.g. Helpful Informative")
-          .onChange(v => (this.newCategory = v.trim()));
-        t.inputEl.style.width = "100%";
+        this.plugin.settings.libraries.forEach(lib => {
+          d.addOption(lib.id, lib.name);
+        });
+        d.setValue(this.libraryId);
+        d.onChange(v => (this.libraryId = v));
       });
 
     new Setting(contentEl)
@@ -569,17 +551,23 @@ class CreateBookModal extends Modal {
           .setCta()
           .onClick(async () => {
             try {
-              const categoryFolder = this.newCategory || this.category;
               if (!this.url) {
                 new Notice("Please enter an Audible URL.");
                 return;
               }
-              if (!categoryFolder) {
-                new Notice("Please select a category or enter a new one.");
+              const library = this.plugin.settings.libraries.find(l => l.id === this.libraryId);
+              if (!library) {
+                new Notice("Selected library not found.");
                 return;
               }
 
-              await this.plugin.createBookFromAudible(this.url, categoryFolder);
+              // Update active library for next time
+              if (this.plugin.settings.activeLibraryId !== this.libraryId) {
+                this.plugin.settings.activeLibraryId = this.libraryId;
+                await this.plugin.saveSettings();
+              }
+
+              await this.plugin.createBookFromAudible(this.url, library);
               this.close();
             } catch (e: any) {
               console.error(e);
@@ -602,11 +590,12 @@ class CreateBookModal extends Modal {
 
 
 // -------------------- plugin --------------------
-export default class AudibleBookCreatorPlugin extends Plugin {
+export default class AudibleLibraryCreatorPlugin extends Plugin {
   settings!: AudibleLibraryCreatorSettings;
 
 
   async onload() {
+    console.log(`Audible Library Creator v${this.manifest.version} loading...`);
     await this.loadSettings();
 
     this.addCommand({
@@ -626,34 +615,24 @@ export default class AudibleBookCreatorPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  async createBookFromAudible(url: string, categoryFolder: string) {
+  async createBookFromAudible(url: string, library: LibrarySettings) {
     const s = this.settings;
-    const booksRoot = safeNormalizePath(s.booksRoot);
-    const categoryName = categoryFolder || s.defaultCategory;
-
-    let categoryPath = booksRoot;
-    if (categoryName) {
-      if (s.separateCategoriesIntoSubfolders) {
-        categoryPath = safeNormalizePath(`${booksRoot}/${categoryName}`);
-      } else {
-        // if subfolders disabled, we just use booksRoot but keep category name for metadata
-      }
-    }
+    const booksRoot = safeNormalizePath(library.booksRoot);
 
     // Ensure folder exists
-    const folder = this.app.vault.getAbstractFileByPath(categoryPath);
+    const folder = this.app.vault.getAbstractFileByPath(booksRoot);
     if (!folder) {
-      await this.app.vault.createFolder(categoryPath);
+      await this.app.vault.createFolder(booksRoot);
     }
 
     new Notice("Fetching Audible page…");
 
-    const data = await scrapeAudible(url, categoryName, s);
+    const data = await scrapeAudible(url, library, s);
 
     const tpl = await readTemplate(this.app, s.bookTemplatePath);
     const md = renderFromTemplate(tpl, data);
 
-    const filePath = safeNormalizePath(`${categoryPath}/${data.title}.md`);
+    const filePath = safeNormalizePath(`${booksRoot}/${data.title}.md`);
 
     const existing = this.app.vault.getAbstractFileByPath(filePath);
     if (existing && existing instanceof TFile) {
