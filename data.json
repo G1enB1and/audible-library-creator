@@ -1,6 +1,6 @@
 {
   "bookTemplatePath": "ObsidianFiles/Templates/library-templates/book-template.md",
-  "authorTemplatePath": "ObsidianFiles/Templates/library-templates-author-template.md",
+  "authorTemplatePath": "ObsidianFiles/Templates/library-templates/author-template.md",
   "seriesTemplatePath": "ObsidianFiles/Templates/library-templates/series-template.md",
   "archiveTemplatePath": "ObsidianFiles/Templates/library-templates/archive-template.md",
   "libraries": [

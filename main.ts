@@ -37,6 +37,16 @@ type BookData = {
   type: string;
 };
 
+type AuthorData = {
+  author: string;     // name
+  url: string;        // audible url
+  imageUrl: string;
+  category: string;
+  rating: string;     // numeric
+  description: string;
+  type: string;
+};
+
 
 
 // -------------------- utils --------------------
@@ -409,49 +419,53 @@ async function readTemplate(app: App, inputPath: string): Promise<string> {
   return await app.vault.read(file);
 }
 
-function renderFromTemplate(tpl: string, data: BookData): string {
-  const authorsPlain = data.authors.map(a => a.name).filter(Boolean).join(", ");
-  const authorsMd = data.authors.length
-    ? data.authors.map(a => a.url ? `[${a.name}](${cleanUrl(a.url)})` : a.name).join(",  \n")
-    : "_Unknown_";
-
-  const seriesPlain = data.series?.name ?? "";
-  const seriesMd = data.series
-    ? (data.series.url ? `[${data.series.name}](${cleanUrl(data.series.url)})` : data.series.name)
-    : "";
-  const bookMd = data.series?.book ?? "";
-
-  const tagsMd = data.tags.map(t => `#${t}`).join(" ");
-  const tagsYaml = "[" + data.tags.map(t => JSON.stringify(t)).join(",") + "]";
-
+function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
   let out = tpl;
-
   // avoid replaceAll for lib target friendliness
   const rep = (k: string, v: string) => { out = out.split(k).join(v); };
 
+  if ("title" in data) {
+    // Book Data
+    const d = data as BookData;
+    const authorsPlain = d.authors.map(a => a.name).filter(Boolean).join(", ");
+    const authorsMd = d.authors.length
+      ? d.authors.map(a => a.url ? `[${a.name}](${cleanUrl(a.url)})` : a.name).join(",  \n")
+      : "_Unknown_";
+
+    const seriesPlain = d.series?.name ?? "";
+    const seriesMd = d.series
+      ? (d.series.url ? `[${d.series.name}](${cleanUrl(d.series.url)})` : d.series.name)
+      : "";
+    const bookMd = d.series?.book ?? "";
+
+    const tagsMd = d.tags.map(t => `#${t}`).join(" ");
+    const tagsYaml = "[" + d.tags.map(t => JSON.stringify(t)).join(",") + "]";
+
+    rep("{{title}}", d.title ?? "");
+    rep("{{cover_url}}", cleanUrl(d.coverUrl ?? ""));
+    rep("{{authors_md}}", authorsMd);
+    rep("{{authors_plain}}", authorsPlain);
+    rep("{{series_md}}", seriesMd);
+    rep("{{series_plain}}", seriesPlain);
+    rep("{{book_md}}", bookMd);
+    rep("{{tags}}", tagsMd);
+    rep("{{tags_yaml}}", tagsYaml);
+    rep("{{status}}", d.status ?? "");
+    rep("{{acquired}}", d.acquired ?? "");
+    rep("{{source}}", d.source ?? "");
+  } else {
+    // Author Data
+    const d = data as AuthorData;
+    rep("{{author_plain}}", d.author);
+    rep("{{author_md}}", `[[${d.author}]]`);
+    rep("{{image_url}}", cleanUrl(d.imageUrl ?? ""));
+  }
+
   rep("{{type}}", data.type ?? "");
-  rep("{{status}}", data.status ?? "");
   rep("{{category}}", data.category ?? "");
-  rep("{{acquired}}", data.acquired ?? "");
-  rep("{{source}}", data.source ?? "");
-
-  rep("{{title}}", data.title ?? "");
   rep("{{url}}", cleanUrl(data.url ?? ""));
-  rep("{{cover_url}}", cleanUrl(data.coverUrl ?? ""));
-
-  rep("{{authors_md}}", authorsMd);
-  rep("{{authors_plain}}", authorsPlain);
-
-  rep("{{series_md}}", seriesMd);
-  rep("{{series_plain}}", seriesPlain);
-
-  rep("{{book_md}}", bookMd);
-
   rep("{{description}}", (data.description ?? "").trim());
   rep("{{rating}}", data.rating ?? "");
-
-  rep("{{tags}}", tagsMd);
-  rep("{{tags_yaml}}", tagsYaml);
 
   out = out.replace(/\n{4,}/g, "\n\n\n");
   return out.trim() + "\n";
@@ -509,6 +523,45 @@ async function scrapeAudible(
     rating: ratingOverride ?? String(settings.defaultRatingNumber),
     tags,
     type: "book"
+  };
+}
+
+async function scrapeAuthor(
+  url: string,
+  library: LibrarySettings,
+  settings: AudibleLibraryCreatorSettings,
+  ratingOverride?: string
+): Promise<AuthorData> {
+  const resp = await requestUrl({ url, headers: { "Accept-Language": "en-US,en;q=0.9" } });
+  const html = resp.text;
+  const doc = parseHtmlToDoc(html);
+
+  // Author name from H1
+  const authorName = doc.querySelector("h1")?.textContent?.trim() ?? "Unknown Author";
+
+  // Image from profile picture or social meta
+  let imageUrl = doc.querySelector("img.author-profile-picture")?.getAttribute("src") ?? "";
+  if (!imageUrl) {
+    imageUrl = doc.querySelector("meta[property='og:image']")?.getAttribute("content") ?? "";
+  }
+
+  // Description
+  const description =
+    doc.querySelector(".bc-expander-content")?.textContent?.trim() ??
+    doc.querySelector(".author-description")?.textContent?.trim() ??
+    doc.querySelector("#author-biography")?.textContent?.trim() ??
+    doc.querySelector(".author-biography-text")?.textContent?.trim() ??
+    doc.querySelector(".a-spacing-small .a-size-medium")?.textContent?.trim() ??
+    "";
+
+  return {
+    author: authorName,
+    url: cleanUrl(url),
+    imageUrl: imageUrl,
+    category: library.name,
+    rating: ratingOverride ?? String(settings.defaultRatingNumber),
+    description: description,
+    type: "author"
   };
 }
 
@@ -614,6 +667,86 @@ class CreateBookModal extends Modal {
   }
 }
 
+class CreateAuthorModal extends Modal {
+  plugin: AudibleLibraryCreatorPlugin;
+  url = "";
+  libraryId = "";
+  rating = "";
+
+  constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
+    super(app);
+    this.plugin = plugin;
+    this.libraryId = plugin.settings.activeLibraryId;
+    this.rating = String(plugin.settings.defaultRatingNumber);
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Create Author from Audible" });
+
+    new Setting(contentEl)
+      .setName("Audible URL")
+      .setDesc("Paste the Audible author page URL")
+      .addText(t => {
+        t.setPlaceholder("https://www.audible.com/author/...")
+          .onChange(v => (this.url = v.trim()));
+        t.inputEl.style.width = "100%";
+      });
+
+    new Setting(contentEl)
+      .setName("Library")
+      .addDropdown(d => {
+        this.plugin.settings.libraries.forEach(lib => {
+          d.addOption(lib.id, lib.name);
+        });
+        d.setValue(this.libraryId);
+        d.onChange(v => (this.libraryId = v));
+      });
+
+    new Setting(contentEl)
+      .setName("Rating")
+      .addText(t => {
+        t.setValue(this.rating)
+          .onChange(v => (this.rating = v.trim()));
+        t.inputEl.style.width = "100%";
+      });
+
+    new Setting(contentEl)
+      .addButton(btn => {
+        btn.setButtonText("Create")
+          .setCta()
+          .onClick(async () => {
+            try {
+              if (!this.url) {
+                new Notice("Please enter an Audible URL.");
+                return;
+              }
+              const library = this.plugin.settings.libraries.find(l => l.id === this.libraryId);
+              if (!library) {
+                new Notice("Selected library not found.");
+                return;
+              }
+              await this.plugin.createAuthorFromAudible(this.url, library, this.rating);
+              this.close();
+            } catch (e: any) {
+              console.error(e);
+              new Notice(`Failed: ${e?.message ?? String(e)}`);
+            }
+          });
+      });
+
+    new Setting(contentEl)
+      .addButton(btn => {
+        btn.setButtonText("Cancel").onClick(() => this.close());
+      });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 
 
 // -------------------- plugin --------------------
@@ -629,6 +762,12 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
       id: "create-book-from-audible",
       name: "Create Book from Audible",
       callback: () => new CreateBookModal(this.app, this).open()
+    });
+
+    this.addCommand({
+      id: "create-author-from-audible",
+      name: "Create Author from Audible",
+      callback: () => new CreateAuthorModal(this.app, this).open()
     });
 
     this.addSettingTab(new AudibleLibraryCreatorSettingTab(this.app, this));
@@ -677,6 +816,46 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
       // Create new
       await this.app.vault.create(filePath, md);
       new Notice(`Created: ${data.title}`);
+    }
+
+    if (s.openCreatedFile) {
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      if (file && file instanceof TFile) {
+        await this.app.workspace.getLeaf(false).openFile(file);
+      }
+    }
+  }
+
+  async createAuthorFromAudible(url: string, library: LibrarySettings, ratingOverride?: string) {
+    const s = this.settings;
+    const authorsRoot = safeNormalizePath(library.authorsFolder);
+
+    // Ensure folder exists
+    const folder = this.app.vault.getAbstractFileByPath(authorsRoot);
+    if (!folder) {
+      await this.app.vault.createFolder(authorsRoot);
+    }
+
+    new Notice("Fetching Audible author page…");
+
+    const data = await scrapeAuthor(url, library, s, ratingOverride);
+
+    const tpl = await readTemplate(this.app, s.authorTemplatePath);
+    const md = renderFromTemplate(tpl, data);
+
+    const filePath = safeNormalizePath(`${authorsRoot}/${data.author}.md`);
+
+    const existing = this.app.vault.getAbstractFileByPath(filePath);
+    if (existing && existing instanceof TFile) {
+      if (!s.overwriteIfExists) {
+        new Notice(`File exists: ${filePath}`);
+        return;
+      }
+      await this.app.vault.modify(existing, md);
+      new Notice(`Updated Author: ${data.author}`);
+    } else {
+      await this.app.vault.create(filePath, md);
+      new Notice(`Created Author: ${data.author}`);
     }
 
     if (s.openCreatedFile) {
