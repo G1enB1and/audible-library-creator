@@ -73,7 +73,7 @@ export const DEFAULT_SETTINGS: AudibleLibraryCreatorSettings = {
   defaultSource: "Audible",
 
   defaultRatingNumber: 3,
-  ratingStyle: "emoji",
+  ratingStyle: "classic",
   allowHalfStars: true,
 
   createSeriesPages: false,

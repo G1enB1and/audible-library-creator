@@ -9,7 +9,7 @@ category: "{{category}}"
 status: "{{status}}"
 acquired: "{{acquired}}"
 source: "{{source}}"
-rating: "{{rating}}"
+rating: {{rating}}
 cover_url: "{{cover_url}}"
 tags: {{tags_yaml}}
 ---
@@ -32,7 +32,21 @@ tags: {{tags_yaml}}
 > **Category:** `=default(this.category, "—")`
 >
 > **Status:** `=default(this.status, "—")`  
-> **Rating:** `=default(this.rating, "—")`
+> **Rating:** `$= (() => { 
+  const r = Number(dv.current().rating); 
+  const max = 5; 
+  const s = app.plugins.plugins["audible-library-creator"]?.settings || {}; 
+  const style = s.ratingStyle || "classic"; 
+  const allowHalf = s.allowHalfStars ?? true; 
+  const full = style === "emoji" ? "⭐" : "★"; 
+  const half = style === "emoji" ? "½" : "⯪"; 
+  const empty = style === "emoji" ? "🌑" : "✰"; 
+  const rounded = allowHalf ? Math.round(r * 2) / 2 : Math.round(r); 
+  const fullCount = Math.floor(rounded); 
+  const hasHalf = allowHalf && (rounded % 1 !== 0); 
+  const emptyCount = Math.max(0, max - fullCount - (hasHalf ? 1 : 0)); 
+  return full.repeat(Math.max(0, fullCount)) + (hasHalf ? half : "") + empty.repeat(Math.max(0, emptyCount)); 
+})()`
 
 
 ## Description:

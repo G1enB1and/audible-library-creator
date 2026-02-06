@@ -32,7 +32,7 @@ type BookData = {
   status: string;     // default blank
   acquired: string;
   source: string;
-  rating: string;     // default ⭐⭐⭐
+  rating: string;     // numeric value
   tags: string[];     // tokens without '#'
   type: string;
 };

@@ -27,7 +27,7 @@
   "defaultAcquired": "Owned",
   "defaultSource": "Audible",
   "defaultRatingNumber": 3,
-  "ratingStyle": "emoji",
+  "ratingStyle": "classic",
   "allowHalfStars": true,
   "createSeriesPages": false,
   "openCreatedFile": false,
