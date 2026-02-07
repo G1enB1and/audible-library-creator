@@ -60,12 +60,15 @@ function cleanUrl(u: string): string {
   const s = (u ?? "").trim();
   if (!s) return "";
   try {
-    const url = new URL(s);
-    url.search = "";
+    const url = new URL(s, "https://www.audible.com");
+    if (!url.pathname.includes("/search")) {
+      url.search = "";
+    }
     url.hash = "";
     return url.toString();
   } catch {
-    // relative or malformed: just strip query/hash
+    // relative or malformed: just strip query/hash UNLESS it's a search
+    if (s.includes("/search")) return s.split("#")[0];
     return s.split("?")[0].split("#")[0];
   }
 }
@@ -299,12 +302,12 @@ function scrapeAuthors(doc: Document, jsonld: any | null): PersonLink[] {
     '[class*="byline"]'
   ];
   for (const sel of selList) {
-    containers.push(...Array.from(doc.querySelectorAll(sel)));
+    containers.push(...queryAllIncludingTemplates(doc, sel));
   }
 
   // also capture nearby parents of text nodes containing "By" / "Written by"
   // We’ll scan elements whose text contains these keywords and that have /author/ links.
-  const allEls = Array.from(doc.querySelectorAll("div,span,section"));
+  const allEls = queryAllIncludingTemplates(doc, "div,span,section");
   for (const el of allEls) {
     const txt = (el.textContent ?? "");
     if (!/(\bBy\b|\bWritten by\b|\bAuthor\b)/i.test(txt)) continue;
@@ -327,7 +330,7 @@ function scrapeAuthors(doc: Document, jsonld: any | null): PersonLink[] {
     result = result.map(a => {
       if (a.url) return a;
       const url = candidates.get(a.name.toLowerCase()) ?? "";
-      return { name: a.name, url: cleanUrl(url) };
+      return { name: a.name, url: absAudibleUrl(url) };
     });
     return dedupePersonsByName(result);
   }
@@ -350,7 +353,7 @@ function scrapeNarrators(doc: Document, jsonld: any | null): PersonLink[] {
   };
 
   // 1) JSON-LD first
-  const jdNar = jsonld?.readBy;
+  const jdNar = jsonld?.readBy ?? jsonld?.narrator;
   if (Array.isArray(jdNar)) {
     for (const n of jdNar) {
       if (typeof n === "string") add(n);
@@ -358,6 +361,8 @@ function scrapeNarrators(doc: Document, jsonld: any | null): PersonLink[] {
     }
   } else if (jdNar && typeof jdNar === "object") {
     add(jdNar.name ?? "", jdNar.url ?? "");
+  } else if (typeof jdNar === "string") {
+    add(jdNar);
   }
 
   let result = dedupePersonsByName(narrators);
@@ -381,18 +386,20 @@ function scrapeNarrators(doc: Document, jsonld: any | null): PersonLink[] {
   for (const el of allEls) {
     const txt = (el.textContent ?? "");
     if (/\bNarrated by\b/i.test(txt)) {
-      if (el.querySelector('a[href*="/narrator/"]')) containers.push(el);
+      if (el.querySelector('a[href*="/narrator/"], a[href*="Narrator"], a[href*="narrator"]')) containers.push(el);
     }
   }
 
   // build candidate map: name -> url
   const candidates = new Map<string, string>();
   for (const c of containers) {
-    const links = Array.from(c.querySelectorAll('a[href*="/narrator/"]')) as HTMLAnchorElement[];
+    const links = Array.from(c.querySelectorAll('a[href]')) as HTMLAnchorElement[];
     for (const a of links) {
+      const href = a.getAttribute("href") ?? "";
+      if (!href.toLowerCase().includes("narrator") && !href.toLowerCase().includes("search")) continue;
       const name = normalizeSpace(a.textContent ?? "");
       if (!name) continue;
-      candidates.set(name.toLowerCase(), absAudibleUrl(a.getAttribute("href") ?? ""));
+      candidates.set(name.toLowerCase(), absAudibleUrl(href));
     }
   }
 
@@ -401,7 +408,7 @@ function scrapeNarrators(doc: Document, jsonld: any | null): PersonLink[] {
     result = result.map(n => {
       if (n.url) return n;
       const url = candidates.get(n.name.toLowerCase()) ?? "";
-      return { name: n.name, url: cleanUrl(url) };
+      return { name: n.name, url: absAudibleUrl(url) };
     });
     return dedupePersonsByName(result);
   }
@@ -410,7 +417,7 @@ function scrapeNarrators(doc: Document, jsonld: any | null): PersonLink[] {
   const filled: PersonLink[] = [];
   for (const [k, v] of candidates.entries()) {
     const pretty = k.replace(/\b\w/g, c => c.toUpperCase());
-    filled.push({ name: pretty, url: cleanUrl(v) });
+    filled.push({ name: pretty, url: absAudibleUrl(v) });
   }
   return dedupePersonsByName(filled);
 }
