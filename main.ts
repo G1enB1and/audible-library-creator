@@ -53,6 +53,16 @@ type AuthorData = {
   type: string;
 };
 
+interface SeriesPageData {
+  series: string;
+  url: string;
+  books: string;
+  description: string;
+  category: string;
+  rating: string;
+  tags: string[];
+  type: string;
+}
 
 
 // -------------------- utils --------------------
@@ -625,7 +635,7 @@ function scrapeTags(doc: Document, jsonld: any | null): string[] {
 
   // 1) Audible chips (restricted to the correct chip group)
   const chips = Array.from(
-    doc.querySelectorAll("adbl-chip-group.product-topictag-impression adbl-chip")
+    doc.querySelectorAll("adbl-chip-group.product-topictag-impression adbl-chip, adbl-chip-group.related-tag-impression adbl-chip")
   );
   for (const chip of chips) {
     const t = normalizeSpace(chip.textContent ?? "");
@@ -670,7 +680,7 @@ async function readTemplate(app: App, inputPath: string): Promise<string> {
   return await app.vault.read(file);
 }
 
-function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
+function renderFromTemplate(tpl: string, data: BookData | AuthorData | SeriesPageData): string {
   let out = tpl;
   // avoid replaceAll for lib target friendliness
   const rep = (k: string, v: string) => { out = out.split(k).join(v); };
@@ -722,6 +732,18 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
     rep("{{status}}", d.status ?? "");
     rep("{{acquired}}", d.acquired ?? "");
     rep("{{source}}", d.source ?? "");
+  } else if ("series" in data && !("title" in data)) {
+    // Series Data
+    const d = data as SeriesPageData;
+    const tagsMd = d.tags.map((t: any) => `#${t}`).join(" ");
+    const tagsYaml = "[" + d.tags.map((t: any) => JSON.stringify(t)).join(",") + "]";
+
+    rep("{{series}}", d.series ?? "");
+    rep("{{Series}}", d.series ?? ""); // Handle both case variations
+    rep("{{books}}", d.books ?? "");
+    rep("{{category}}", d.category ?? "");
+    rep("{{tags}}", tagsMd);
+    rep("{{tags_yaml}}", tagsYaml);
   } else {
     // Author Data
     const d = data as AuthorData;
@@ -815,6 +837,8 @@ async function scrapeAuthor(
   const resp = await requestUrl({ url, headers: { "Accept-Language": "en-US,en;q=0.9" } });
   const html = resp.text;
   const doc = parseHtmlToDoc(html);
+  const jsonlds = extractJsonLdObjects(doc);
+  const jsonld = pickBookishJsonLd(jsonlds);
 
   // Author name from H1
   const authorName = doc.querySelector("h1")?.textContent?.trim() ?? "Unknown Author";
@@ -825,25 +849,110 @@ async function scrapeAuthor(
     imageUrl = doc.querySelector("meta[property='og:image']")?.getAttribute("content") ?? "";
   }
 
-  // Description
-  const description =
-    doc.querySelector(".bc-expander-content")?.textContent?.trim() ??
-    doc.querySelector(".author-description")?.textContent?.trim() ??
-    doc.querySelector("#author-biography")?.textContent?.trim() ??
-    doc.querySelector(".author-biography-text")?.textContent?.trim() ??
-    doc.querySelector(".a-spacing-small .a-size-medium")?.textContent?.trim() ??
-    "";
-
   return {
     author: authorName,
     url: cleanUrl(url),
-    imageUrl: imageUrl,
-    category: library.name,
-    rating: ratingOverride ?? String(settings.defaultRatingNumber),
-    description: description,
-    type: "author"
+    imageUrl: cleanUrl(imageUrl),
+    category: "Author",
+    rating: ratingOverride ?? "0",
+    description: scrapeDescription(doc, jsonld),
+    type: "Author"
   };
 }
+
+async function scrapeSeriesPage(
+  url: string,
+  settings: AudibleLibraryCreatorSettings,
+  libraryName: string,
+  ratingOverride?: string
+): Promise<SeriesPageData> {
+  const resp = await requestUrl({ url, headers: { "Accept-Language": "en-US,en;q=0.9" } });
+  const html = resp.text;
+  const doc = parseHtmlToDoc(html);
+  const jsonlds = extractJsonLdObjects(doc);
+  const jsonld = pickBookishJsonLd(jsonlds);
+
+  const seriesName = normalizeSpace(doc.querySelector("h1")?.textContent ?? "");
+
+  // Description
+  // Try specific DOM selectors first to avoid generic SEO text in JSON-LD
+  let description = "";
+  const descEls = [
+    doc.querySelector(".series-summary-content"),
+    doc.querySelector("#series-description .bc-section"),
+    doc.querySelector('[data-widget="description"] .bc-text'),
+    doc.querySelector('[data-testid="description"]'),
+    doc.querySelector(".series-description"),
+    doc.querySelector(".bc-expander-content")
+  ];
+  for (const el of descEls) {
+    if (el) {
+      description = normalizeSpace(el.textContent ?? "");
+      if (description && !description.includes("Listen to") && !description.includes("Audiobooks on Audible")) {
+        break;
+      }
+    }
+  }
+
+  if (!description) {
+    description = scrapeDescription(doc, jsonld);
+  }
+
+  // Tags
+  let tags = scrapeTags(doc, jsonld);
+  if (tags.length === 0) {
+    // try any bc-chips
+    const chips = doc.querySelectorAll(".bc-chip");
+    for (const chip of Array.from(chips)) {
+      const t = normalizeSpace(chip.textContent ?? "");
+      if (t) tags.push(...tagify(t));
+    }
+  }
+  tags = dedupeKeepOrder(tags);
+  const category = libraryName;
+
+  // Books Count
+  const numBooksEl = doc.querySelector(".num-books-in-series");
+  let booksCount = "0";
+  if (numBooksEl) {
+    const m = numBooksEl.textContent?.match(/(\d+)/);
+    if (m) booksCount = m[1];
+  }
+
+  if (booksCount === "0") {
+    // Fallback to counting items in the main container only, if possible
+    // Search for the main product list item container
+    const mainResults = doc.querySelector('#series-results, [data-widget="product-list"]');
+    const productItems = mainResults ? queryAllIncludingTemplates(mainResults, 'li.bc-list-item, [data-testid="product-list-item"]') : [];
+
+    if (productItems.length > 0) {
+      booksCount = productItems.length.toString();
+    } else {
+      // try to find title text like "5 titles"
+      const textNodes = doc.querySelectorAll(".bc-text, .bc-heading");
+      for (const node of Array.from(textNodes)) {
+        const t = node.textContent ?? "";
+        const m = t.match(/(\d+)\s+titles/);
+        if (m) {
+          booksCount = m[1];
+          break;
+        }
+      }
+    }
+  }
+
+  return {
+    series: seriesName,
+    url: cleanUrl(url),
+    books: booksCount,
+    description: description,
+    category: category,
+    rating: ratingOverride ?? "0",
+    tags: tags,
+    type: "Series"
+  };
+}
+
 
 
 
@@ -1046,27 +1155,106 @@ class CreateAuthorModal extends Modal {
   }
 }
 
+class CreateSeriesModal extends Modal {
+  plugin: AudibleLibraryCreatorPlugin;
+  url = "";
+  libraryId = "";
+  rating = "";
 
+  constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
+    super(app);
+    this.plugin = plugin;
+    this.libraryId = plugin.settings.activeLibraryId;
+    this.rating = String(plugin.settings.defaultRatingNumber);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Create Series Page from Audible" });
+
+    new Setting(contentEl)
+      .setName("Audible Series URL")
+      .setDesc("Paste the Audible series page URL")
+      .addText(t => {
+        t.setPlaceholder("https://www.audible.com/series/...")
+          .onChange(v => (this.url = v.trim()));
+        t.inputEl.style.width = "100%";
+      });
+
+    new Setting(contentEl)
+      .setName("Library")
+      .setDesc("Select the target library for this series.")
+      .addDropdown(d => {
+        this.plugin.settings.libraries.forEach(lib => {
+          d.addOption(lib.id, lib.name);
+        });
+        d.setValue(this.libraryId);
+        d.onChange(v => (this.libraryId = v));
+      });
+
+    new Setting(contentEl)
+      .setName("Rating")
+      .setDesc("Numeric rating (e.g. 3 or 4.5)")
+      .addText(t => {
+        t.setValue(this.rating)
+          .onChange(v => (this.rating = v.trim()));
+        t.inputEl.style.width = "100%";
+      });
+
+    new Setting(contentEl).addButton(btn =>
+      btn
+        .setButtonText("Create Series Page")
+        .setCta()
+        .onClick(async () => {
+          if (!this.url) {
+            new Notice("Please enter a URL.");
+            return;
+          }
+          const lib = this.plugin.settings.libraries.find(l => l.id === this.libraryId);
+          if (!lib) return;
+          this.close();
+          await this.plugin.createSeriesFromAudible(this.url, lib, this.rating);
+        })
+    );
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
 
 // -------------------- plugin --------------------
 export default class AudibleLibraryCreatorPlugin extends Plugin {
   settings!: AudibleLibraryCreatorSettings;
 
-
   async onload() {
     console.log(`Audible Library Creator v${this.manifest.version} loading...`);
     await this.loadSettings();
 
+    this.addRibbonIcon("book-open", "Add Audible Book", () => {
+      new CreateBookModal(this.app, this).open();
+    });
+    this.addRibbonIcon("library", "Add Audible Series", () => {
+      new CreateSeriesModal(this.app, this).open();
+    });
+
     this.addCommand({
-      id: "create-book-from-audible",
-      name: "Create Book from Audible",
+      id: "add-audible-book",
+      name: "Add Audible Book",
       callback: () => new CreateBookModal(this.app, this).open()
     });
 
     this.addCommand({
-      id: "create-author-from-audible",
-      name: "Create Author from Audible",
+      id: "add-audible-author",
+      name: "Add Audible Author",
       callback: () => new CreateAuthorModal(this.app, this).open()
+    });
+
+    this.addCommand({
+      id: "add-audible-series",
+      name: "Add Audible Series",
+      callback: () => new CreateSeriesModal(this.app, this).open()
     });
 
     this.addSettingTab(new AudibleLibraryCreatorSettingTab(this.app, this));
@@ -1147,42 +1335,79 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
   }
 
   async createAuthorFromAudible(url: string, library: LibrarySettings, ratingOverride?: string) {
-    const s = this.settings;
-    const authorsRoot = safeNormalizePath(library.authorsFolder);
+    try {
+      new Notice("Scraping author...");
+      const data = await scrapeAuthor(url, library, this.settings, ratingOverride);
+      const templatePath = this.settings.authorTemplatePath;
+      const template = await readTemplate(this.app, templatePath);
+      const content = renderFromTemplate(template, data);
 
-    // Ensure folder exists
-    const folder = this.app.vault.getAbstractFileByPath(authorsRoot);
-    if (!folder) {
-      await this.app.vault.createFolder(authorsRoot);
-    }
+      const folderPath = safeNormalizePath(library.authorsFolder);
+      const fileName = `${data.author}.md`;
+      const filePath = `${folderPath}/${fileName}`;
 
-    new Notice("Fetching Audible author page…");
+      let folder = this.app.vault.getAbstractFileByPath(folderPath);
+      if (!folder) await this.app.vault.createFolder(folderPath);
 
-    const data = await scrapeAuthor(url, library, s, ratingOverride);
-
-    const tpl = await readTemplate(this.app, s.authorTemplatePath);
-    const md = renderFromTemplate(tpl, data);
-
-    const filePath = safeNormalizePath(`${authorsRoot}/${data.author}.md`);
-
-    const existing = this.app.vault.getAbstractFileByPath(filePath);
-    if (existing && existing instanceof TFile) {
-      if (!s.overwriteIfExists) {
-        new Notice(`File exists: ${filePath}`);
-        return;
+      const existing = this.app.vault.getAbstractFileByPath(filePath);
+      if (existing && existing instanceof TFile) {
+        if (!this.settings.overwriteIfExists) {
+          new Notice("Author page already exists.");
+          return;
+        }
+        await this.app.vault.modify(existing, content);
+        new Notice(`Updated author page: ${data.author}`);
+      } else {
+        await this.app.vault.create(filePath, content);
+        new Notice(`Author page created: ${data.author}`);
       }
-      await this.app.vault.modify(existing, md);
-      new Notice(`Updated Author: ${data.author}`);
-    } else {
-      await this.app.vault.create(filePath, md);
-      new Notice(`Created Author: ${data.author}`);
-    }
 
-    if (s.openCreatedFile) {
-      const file = this.app.vault.getAbstractFileByPath(filePath);
-      if (file && file instanceof TFile) {
-        await this.app.workspace.getLeaf(false).openFile(file);
+      if (this.settings.openCreatedFile) {
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
       }
+    } catch (e: any) {
+      console.error(e);
+      new Notice(`Error: ${e.message}`);
+    }
+  }
+
+  async createSeriesFromAudible(url: string, library: LibrarySettings, ratingOverride?: string) {
+    try {
+      new Notice("Scraping series...");
+      const data = await scrapeSeriesPage(url, this.settings, library.name, ratingOverride);
+
+      const tplPath = this.settings.seriesTemplatePath;
+      const tpl = await readTemplate(this.app, tplPath);
+      const content = renderFromTemplate(tpl, data);
+
+      const folderPath = safeNormalizePath(library.seriesFolder);
+      const fileName = `${normalizeTitle(data.series)}.md`;
+      const filePath = `${folderPath}/${fileName}`;
+
+      let folder = this.app.vault.getAbstractFileByPath(folderPath);
+      if (!folder) await this.app.vault.createFolder(folderPath);
+
+      const existing = this.app.vault.getAbstractFileByPath(filePath);
+      if (existing && existing instanceof TFile) {
+        if (!this.settings.overwriteIfExists) {
+          new Notice("Series page already exists.");
+          return;
+        }
+        await this.app.vault.modify(existing, content);
+        new Notice(`Updated series page: ${data.series}`);
+      } else {
+        await this.app.vault.create(filePath, content);
+        new Notice(`Series page created: ${data.series}`);
+      }
+
+      if (this.settings.openCreatedFile) {
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
+      }
+    } catch (e: any) {
+      console.error(e);
+      new Notice(`Error: ${e.message}`);
     }
   }
 }
