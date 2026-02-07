@@ -28,7 +28,7 @@ type BookData = {
   authors: PersonLink[];
   narrators: PersonLink[];
   length: string;
-  publisher: string;
+  publisher: PersonLink;
   releaseDate: string;
   startDate: string;
   finishDate: string;
@@ -453,28 +453,95 @@ function scrapeLength(doc: Document, adblMeta: any | null, jsonld: any | null): 
   return normalizeSpace(parts[1] ?? "");
 }
 
-function scrapePublisher(doc: Document, adblMeta: any | null, jsonld: any | null): string {
-  if (adblMeta?.publisher?.name) return normalizeSpace(adblMeta.publisher.name);
-  if (jsonld?.publisher?.name) return normalizeSpace(jsonld.publisher.name);
-  if (typeof jsonld?.publisher === "string") return normalizeSpace(jsonld.publisher);
+function scrapePublisher(doc: Document, adblMeta: any | null, jsonld: any | null): PersonLink {
+  const makeLink = (name: string, url?: string): PersonLink => {
+    return { name: normalizeSpace(name), url: absAudibleUrl(url ?? "") };
+  };
 
-  const lines = queryAllIncludingTemplates(doc, '[data-testid="line"]');
-  const line = lines.find(l => {
-    const text = l.querySelector(".label")?.textContent?.toLowerCase() ?? "";
-    const eventId = l.getAttribute("data-event-id")?.toLowerCase() ?? "";
-    const key = l.getAttribute("key")?.toLowerCase() ?? "";
-    return text.includes("publisher") || eventId === "publisher" || key === "publisher";
-  });
-  if (!line) return "";
+  // 1. Determine the best name and potential URL from sources
+  let pName = "";
+  let pUrl = "";
 
-  const a = line.querySelector("a");
-  if (a) return normalizeSpace(a.textContent ?? "");
+  // Priority 1: adblMeta
+  if (adblMeta?.publisher) {
+    if (typeof adblMeta.publisher === "string") {
+      pName = adblMeta.publisher;
+    } else {
+      pName = adblMeta.publisher.name ?? "";
+      pUrl = adblMeta.publisher.url ?? "";
+    }
+  }
 
-  const valText = line.querySelector(".values .text")?.textContent;
-  if (valText) return normalizeSpace(valText);
+  // Priority 2: JSON-LD (if no name yet)
+  if (!pName) {
+    if (jsonld?.publisher?.name) {
+      pName = jsonld.publisher.name;
+      pUrl = jsonld.publisher.url ?? "";
+    } else if (typeof jsonld?.publisher === "string") {
+      pName = jsonld.publisher;
+    }
+  }
 
-  const parts = line.textContent?.split(":") ?? [];
-  return normalizeSpace(parts[1] ?? "");
+  // Priority 3: DOM (if no name yet)
+  if (!pName) {
+    const lines = queryAllIncludingTemplates(doc, '[data-testid="line"]');
+    const line = lines.find(l => {
+      const text = l.querySelector(".label")?.textContent?.toLowerCase() ?? "";
+      const eventId = l.getAttribute("data-event-id")?.toLowerCase() ?? "";
+      const key = l.getAttribute("key")?.toLowerCase() ?? "";
+      return text.includes("publisher") || eventId === "publisher" || key === "publisher";
+    });
+
+    if (line) {
+      const a = line.querySelector("a");
+      if (a) {
+        pName = a.textContent ?? "";
+        pUrl = a.getAttribute("href") ?? "";
+      } else {
+        const valText = line.querySelector(".values .text")?.textContent;
+        if (valText) {
+          pName = valText;
+        } else {
+          const parts = line.textContent?.split(":") ?? [];
+          if (parts[1]) pName = parts[1];
+        }
+      }
+    }
+  }
+
+  pName = normalizeSpace(pName);
+  pUrl = absAudibleUrl(pUrl);
+
+  // If we have no name, give up
+  if (!pName) return makeLink("Unknown Publisher");
+
+  // If we have a URL, we're good
+  if (pUrl) return makeLink(pName, pUrl);
+
+  // 2. We have a Name but no URL. Let's find one.
+  // Scan all links in the doc for this publisher name or searchProvider
+  const links = queryAllIncludingTemplates(doc, "a[href]") as HTMLAnchorElement[];
+  for (const link of links) {
+    const href = link.getAttribute("href") ?? "";
+    const lText = normalizeSpace(link.textContent ?? "");
+
+    // Exact name match?
+    if (lText.toLowerCase() === pName.toLowerCase()) {
+      return makeLink(pName, href);
+    }
+
+    // Fallback: heuristic match on keywords
+    if (href.toLowerCase().includes("search") && (href.toLowerCase().includes("provider") || href.toLowerCase().includes("publisher"))) {
+      if (lText.toLowerCase().includes(pName.toLowerCase()) || pName.toLowerCase().includes(lText.toLowerCase())) {
+        return makeLink(pName, href);
+      }
+    }
+  }
+
+  // 3. Last Resort: Construct a search URL
+  // "https://www.audible.com/search?searchProvider=NAME"
+  const searchUrl = `https://www.audible.com/search?searchProvider=${encodeURIComponent(pName)}`;
+  return makeLink(pName, searchUrl);
 }
 
 function scrapeReleaseDate(doc: Document, adblMeta: any | null, jsonld: any | null): string {
@@ -627,6 +694,11 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
       : "";
     const bookMd = d.series?.book ?? "";
 
+    const publisherPlain = d.publisher?.name ?? "";
+    const publisherMd = d.publisher
+      ? (d.publisher.url ? `[${d.publisher.name}](${cleanUrl(d.publisher.url)})` : d.publisher.name)
+      : "";
+
     const tagsMd = d.tags.map((t: any) => `#${t}`).join(" ");
     const tagsYaml = "[" + d.tags.map((t: any) => JSON.stringify(t)).join(",") + "]";
 
@@ -637,7 +709,8 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
     rep("{{narrators_md}}", narratorsMd);
     rep("{{narrators_plain}}", narratorsPlain);
     rep("{{length}}", d.length ?? "");
-    rep("{{publisher}}", d.publisher ?? "");
+    rep("{{publisher}}", publisherMd);
+    rep("{{publisher_plain}}", publisherPlain);
     rep("{{release_date}}", d.releaseDate ?? "");
     rep("{{start_date}}", d.startDate ?? "");
     rep("{{finish_date}}", d.finishDate ?? "");
