@@ -26,6 +26,12 @@ type BookData = {
   url: string;
   coverUrl: string;
   authors: PersonLink[];
+  narrators: PersonLink[];
+  length: string;
+  publisher: string;
+  releaseDate: string;
+  startDate: string;
+  finishDate: string;
   series?: SeriesInfo;
   description: string;
   category: string;
@@ -178,7 +184,29 @@ function pickBookishJsonLd(jsonlds: any[]): any | null {
   return jsonlds.length ? jsonlds[0] : null;
 }
 
+function queryAllIncludingTemplates(docOrEl: ParentNode, selector: string): Element[] {
+  const result: Element[] = Array.from(docOrEl.querySelectorAll(selector));
+  const templates = docOrEl.querySelectorAll("template");
+  for (let i = 0; i < templates.length; i++) {
+    const t = templates[i] as HTMLTemplateElement;
+    if (t.content) {
+      result.push(...queryAllIncludingTemplates(t.content, selector));
+    }
+  }
+  return result;
+}
+
 // -------------------- scrape pieces (DOM-based) --------------------
+function scrapeAdblMetadata(doc: Document): any | null {
+  const metaEl = doc.querySelector('adbl-product-metadata script[type="application/json"]');
+  if (!metaEl) return null;
+  try {
+    return JSON.parse(metaEl.textContent ?? "{}");
+  } catch {
+    return null;
+  }
+}
+
 function scrapeTitleAndUrl(doc: Document, inputUrl: string, jsonld: any | null): { title: string; url: string } {
   const jdTitle = typeof jsonld?.name === "string" ? normalizeSpace(jsonld.name) : "";
   const jdUrl = typeof jsonld?.url === "string" ? cleanUrl(jsonld.url) : "";
@@ -220,7 +248,7 @@ function scrapeDescription(doc: Document, jsonld: any | null): string {
   return og ? normalizeSpace(og) : "";
 }
 
-function dedupeAuthorsByName(items: PersonLink[]): PersonLink[] {
+function dedupePersonsByName(items: PersonLink[]): PersonLink[] {
   const seen = new Set<string>();
   const out: PersonLink[] = [];
   for (const a of items) {
@@ -256,7 +284,7 @@ function scrapeAuthors(doc: Document, jsonld: any | null): PersonLink[] {
     add(jdAuth);
   }
 
-  let result = dedupeAuthorsByName(authors);
+  let result = dedupePersonsByName(authors);
   const needFill = result.length === 0 || result.some(a => !a.url);
 
   if (!needFill) return result;
@@ -301,7 +329,7 @@ function scrapeAuthors(doc: Document, jsonld: any | null): PersonLink[] {
       const url = candidates.get(a.name.toLowerCase()) ?? "";
       return { name: a.name, url: cleanUrl(url) };
     });
-    return dedupeAuthorsByName(result);
+    return dedupePersonsByName(result);
   }
 
   // if JSON-LD had no authors (rare), fall back to candidates
@@ -310,7 +338,156 @@ function scrapeAuthors(doc: Document, jsonld: any | null): PersonLink[] {
     const pretty = k.replace(/\b\w/g, c => c.toUpperCase());
     filled.push({ name: pretty, url: cleanUrl(v) });
   }
-  return dedupeAuthorsByName(filled);
+  return dedupePersonsByName(filled);
+}
+
+function scrapeNarrators(doc: Document, jsonld: any | null): PersonLink[] {
+  const narrators: PersonLink[] = [];
+  const add = (name: string, url?: string) => {
+    const n = normalizeSpace(name);
+    if (!n) return;
+    narrators.push({ name: n, url: absAudibleUrl(url ?? "") });
+  };
+
+  // 1) JSON-LD first
+  const jdNar = jsonld?.readBy;
+  if (Array.isArray(jdNar)) {
+    for (const n of jdNar) {
+      if (typeof n === "string") add(n);
+      else if (n && typeof n === "object") add(n.name ?? "", n.url ?? "");
+    }
+  } else if (jdNar && typeof jdNar === "object") {
+    add(jdNar.name ?? "", jdNar.url ?? "");
+  }
+
+  let result = dedupePersonsByName(narrators);
+  const needUrls = result.length === 0 || result.some(n => !n.url);
+  if (!needUrls) return result;
+
+  // 2) Scan containers to fill URLs or find missing names
+  const containers: Element[] = [];
+  const selList = [
+    '[data-testid*="byline"]',
+    '[class*="byLine"]',
+    '[class*="byline"]',
+    '[data-testid*="narrator"]',
+    '[data-testid="line"]'
+  ];
+  for (const sel of selList) {
+    containers.push(...queryAllIncludingTemplates(doc, sel));
+  }
+
+  const allEls = queryAllIncludingTemplates(doc, "div,span,section,li");
+  for (const el of allEls) {
+    const txt = (el.textContent ?? "");
+    if (/\bNarrated by\b/i.test(txt)) {
+      if (el.querySelector('a[href*="/narrator/"]')) containers.push(el);
+    }
+  }
+
+  // build candidate map: name -> url
+  const candidates = new Map<string, string>();
+  for (const c of containers) {
+    const links = Array.from(c.querySelectorAll('a[href*="/narrator/"]')) as HTMLAnchorElement[];
+    for (const a of links) {
+      const name = normalizeSpace(a.textContent ?? "");
+      if (!name) continue;
+      candidates.set(name.toLowerCase(), absAudibleUrl(a.getAttribute("href") ?? ""));
+    }
+  }
+
+  // fill known names
+  if (result.length) {
+    result = result.map(n => {
+      if (n.url) return n;
+      const url = candidates.get(n.name.toLowerCase()) ?? "";
+      return { name: n.name, url: cleanUrl(url) };
+    });
+    return dedupePersonsByName(result);
+  }
+
+  // fallback to candidates
+  const filled: PersonLink[] = [];
+  for (const [k, v] of candidates.entries()) {
+    const pretty = k.replace(/\b\w/g, c => c.toUpperCase());
+    filled.push({ name: pretty, url: cleanUrl(v) });
+  }
+  return dedupePersonsByName(filled);
+}
+
+function scrapeLength(doc: Document, adblMeta: any | null, jsonld: any | null): string {
+  if (adblMeta?.duration) return normalizeSpace(adblMeta.duration);
+  if (jsonld?.duration) {
+    const d = String(jsonld.duration);
+    if (d.startsWith("PT")) {
+      const h = d.match(/(\d+)H/)?.[1];
+      const m = d.match(/(\d+)M/)?.[1];
+      let out = "";
+      if (h) out += `${h} hrs `;
+      if (m) out += `${m} mins`;
+      return normalizeSpace(out) || d;
+    }
+    return normalizeSpace(d);
+  }
+
+  const lines = queryAllIncludingTemplates(doc, '[data-testid="line"]');
+  const line = lines.find(l => {
+    const text = l.querySelector(".label")?.textContent?.toLowerCase() ?? "";
+    const eventId = l.getAttribute("data-event-id")?.toLowerCase() ?? "";
+    const key = l.getAttribute("key")?.toLowerCase() ?? "";
+    return text.includes("length") || text.includes("runtime") || eventId === "duration" || eventId === "runtime" || key === "duration" || key === "runtime";
+  });
+  if (!line) return "";
+
+  const valText = line.querySelector(".values .text")?.textContent;
+  if (valText) return normalizeSpace(valText);
+
+  const parts = line.textContent?.split(":") ?? [];
+  return normalizeSpace(parts[1] ?? "");
+}
+
+function scrapePublisher(doc: Document, adblMeta: any | null, jsonld: any | null): string {
+  if (adblMeta?.publisher?.name) return normalizeSpace(adblMeta.publisher.name);
+  if (jsonld?.publisher?.name) return normalizeSpace(jsonld.publisher.name);
+  if (typeof jsonld?.publisher === "string") return normalizeSpace(jsonld.publisher);
+
+  const lines = queryAllIncludingTemplates(doc, '[data-testid="line"]');
+  const line = lines.find(l => {
+    const text = l.querySelector(".label")?.textContent?.toLowerCase() ?? "";
+    const eventId = l.getAttribute("data-event-id")?.toLowerCase() ?? "";
+    const key = l.getAttribute("key")?.toLowerCase() ?? "";
+    return text.includes("publisher") || eventId === "publisher" || key === "publisher";
+  });
+  if (!line) return "";
+
+  const a = line.querySelector("a");
+  if (a) return normalizeSpace(a.textContent ?? "");
+
+  const valText = line.querySelector(".values .text")?.textContent;
+  if (valText) return normalizeSpace(valText);
+
+  const parts = line.textContent?.split(":") ?? [];
+  return normalizeSpace(parts[1] ?? "");
+}
+
+function scrapeReleaseDate(doc: Document, adblMeta: any | null, jsonld: any | null): string {
+  if (adblMeta?.releaseDate) return normalizeSpace(adblMeta.releaseDate);
+  if (jsonld?.datePublished) return normalizeSpace(jsonld.datePublished);
+
+  const lines = queryAllIncludingTemplates(doc, '[data-testid="line"]');
+  const line = lines.find(l => {
+    const text = l.querySelector(".label")?.textContent?.toLowerCase() ?? "";
+    const eventId = l.getAttribute("data-event-id")?.toLowerCase() ?? "";
+    const key = l.getAttribute("key")?.toLowerCase() ?? "";
+    return text.includes("release date") || eventId === "releasedate" || key === "releasedate";
+  });
+  if (!line) return "";
+
+  const valText = line.querySelector(".values .text")?.textContent;
+  if (valText) return normalizeSpace(valText);
+
+  const parts = line.textContent?.split(":") ?? [];
+  return normalizeSpace(parts[1] ?? "");
 }
 
 function scrapeSeries(doc: Document): SeriesInfo | undefined {
@@ -432,6 +609,11 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
       ? d.authors.map((a: any) => a.url ? `[${a.name}](${cleanUrl(a.url)})` : a.name).join(",  \n")
       : "_Unknown_");
 
+    const narratorsPlain = (d.narrators ?? []).map((a: any) => a.name).filter(Boolean).join(", ");
+    const narratorsMd = (d.narrators ?? []).length
+      ? (d.narrators ?? []).map((a: any) => a.url ? `[${a.name}](${cleanUrl(a.url)})` : a.name).join(",  \n")
+      : "_Unknown_";
+
     const seriesPlain = d.series?.name ?? "";
     const seriesMd = d.series
       ? (d.series.url ? `[${d.series.name}](${cleanUrl(d.series.url)})` : d.series.name)
@@ -445,6 +627,13 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData): string {
     rep("{{cover_url}}", cleanUrl(d.coverUrl ?? ""));
     rep("{{authors_md}}", authorsMd);
     rep("{{authors_plain}}", authorsPlain);
+    rep("{{narrators_md}}", narratorsMd);
+    rep("{{narrators_plain}}", narratorsPlain);
+    rep("{{length}}", d.length ?? "");
+    rep("{{publisher}}", d.publisher ?? "");
+    rep("{{release_date}}", d.releaseDate ?? "");
+    rep("{{start_date}}", d.startDate ?? "");
+    rep("{{finish_date}}", d.finishDate ?? "");
     rep("{{series_md}}", seriesMd);
     rep("{{series_plain}}", seriesPlain);
     rep("{{book_md}}", bookMd);
@@ -493,7 +682,12 @@ async function scrapeAudible(
   const description = scrapeDescription(doc, jsonld);
 
   const authors = scrapeAuthors(doc, jsonld);
+  const adblMeta = scrapeAdblMetadata(doc);
+  const narrators = scrapeNarrators(doc, jsonld);
   const series = scrapeSeries(doc);
+  const length = scrapeLength(doc, adblMeta, jsonld);
+  const publisher = scrapePublisher(doc, adblMeta, jsonld);
+  const releaseDate = scrapeReleaseDate(doc, adblMeta, jsonld);
 
   // tags
   let tags: string[] = [];
@@ -514,7 +708,13 @@ async function scrapeAudible(
     url: cleanUrl(canonicalUrl),
     coverUrl,
     authors,
+    narrators,
     series,
+    length,
+    publisher,
+    releaseDate,
+    startDate: "",
+    finishDate: "",
     description,
     category: library.name,
     status: statusOverride ?? settings.defaultStatus,
