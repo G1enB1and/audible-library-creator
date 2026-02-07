@@ -68,11 +68,6 @@ tags: {{tags_yaml}}
 
 ## My Thoughts:
 
-### Overall:
--
-
-### Daily Reflections
-
 [➕ Add thought to Book](obsidian://quickadd?choice=Add%20Book%20Thought)
 
 
