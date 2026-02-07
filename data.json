@@ -29,8 +29,11 @@
   "defaultRatingNumber": 3,
   "ratingStyle": "classic",
   "allowHalfStars": true,
-  "createSeriesPages": false,
+  "showBookRibbonIcon": true,
+  "showSeriesRibbonIcon": true,
+  "showAuthorRibbonIcon": true,
   "openCreatedFile": false,
   "overwriteIfExists": true,
-  "tagRulesJson": "{\n  \"baseTags\": [\n    \"Book\",\n    \"Audible\"\n  ],\n  \"categoryTags\": {\n    \"Adult Fantasy\": [\n      \"Adult\",\n      \"Fantasy\",\n      \"Erotic\"\n    ]\n  }\n}"
+  "tagRulesJson": "{\n  \"baseTags\": [\n    \"Book\",\n    \"Audible\"\n  ],\n  \"categoryTags\": {\n    \"Adult Fantasy\": [\n      \"Adult\",\n      \"Fantasy\",\n      \"Erotic\"\n    ]\n  }\n}",
+  "createSeriesPages": false
 }
