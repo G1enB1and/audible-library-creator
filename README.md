@@ -131,7 +131,7 @@ The plugin does not enforce layout — your template controls presentation.
 
 ---
 
-## 🧠 Known Notes
+## 🧠 Known Issues & Notes
 
 - Audible pages vary slightly; rare edge cases may miss optional metadata
 - Dataview fields may briefly show em dashes (—) until Obsidian finishes indexing
