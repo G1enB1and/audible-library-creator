@@ -10,7 +10,7 @@
       "booksRoot": "Library/Categories/Fiction/Fiction Books",
       "authorsFolder": "Library/Categories/Fiction/Fiction Authors",
       "seriesFolder": "Library/Categories/Fiction/Fiction Series",
-      "archivePath": "Library/Categories/Fiction/!Fiction Archive.md"
+      "archivePath": "Library/Categories/Fiction/!Fiction Books Archive.md"
     },
     {
       "id": "lib-1770399942121",
@@ -18,7 +18,7 @@
       "booksRoot": "Library/Categories/Adult Fantasy/Adult Fantasy Books",
       "authorsFolder": "Library/Categories/Adult Fantasy/Adult Fantasy Authors",
       "seriesFolder": "Library/Categories/Adult Fantasy/Adult Fantasy Series",
-      "archivePath": "Library/Categories/Fiction/!Adult Fantasy Archive.md"
+      "archivePath": "Library/Categories/Adult Fantasy/!Adult Fantasy Books Archive.md"
     }
   ],
   "activeLibraryId": "lib-1770399942121",
