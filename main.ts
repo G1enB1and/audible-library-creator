@@ -965,6 +965,7 @@ class CreateBookModal extends Modal {
   rating = "";
   overwriteOverride = false;
   createAuthorPage = false;
+  createSeriesPage = false;
 
   constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
     super(app);
@@ -972,6 +973,7 @@ class CreateBookModal extends Modal {
     this.libraryId = plugin.settings.activeLibraryId;
     this.status = plugin.settings.defaultStatus;
     this.rating = String(plugin.settings.defaultRatingNumber);
+    this.overwriteOverride = plugin.settings.overwriteIfExists;
   }
 
   async onOpen() {
@@ -1023,13 +1025,27 @@ class CreateBookModal extends Modal {
           .onChange(v => (this.overwriteOverride = v));
       });
 
-    if (this.plugin.settings.authorTemplatePath) {
+    const lib = this.plugin.settings.libraries.find(l => l.id === this.libraryId);
+    const hasAuthorFolder = lib && safeNormalizePath(lib.authorsFolder);
+
+    if (this.plugin.settings.authorTemplatePath && hasAuthorFolder) {
       new Setting(contentEl)
         .setName("Create Author's Page")
         .setDesc("Automatically create or update the author's reference page.")
         .addToggle(tg => {
           tg.setValue(this.createAuthorPage)
             .onChange(v => (this.createAuthorPage = v));
+        });
+    }
+
+    const hasSeriesFolder = lib && safeNormalizePath(lib.seriesFolder);
+    if (this.plugin.settings.seriesTemplatePath && hasSeriesFolder) {
+      new Setting(contentEl)
+        .setName("Create Series Page")
+        .setDesc("Automatically create or update the series reference page.")
+        .addToggle(tg => {
+          tg.setValue(this.createSeriesPage)
+            .onChange(v => (this.createSeriesPage = v));
         });
     }
 
@@ -1055,7 +1071,7 @@ class CreateBookModal extends Modal {
                 await this.plugin.saveSettings();
               }
 
-              await this.plugin.createBookFromAudible(this.url, library, this.status, this.rating, this.overwriteOverride, this.createAuthorPage);
+              await this.plugin.createBookFromAudible(this.url, library, this.status, this.rating, this.overwriteOverride, this.createAuthorPage, this.createSeriesPage);
               this.close();
             } catch (e: any) {
               console.error(e);
@@ -1080,12 +1096,14 @@ class CreateAuthorModal extends Modal {
   url = "";
   libraryId = "";
   rating = "";
+  overwriteOverride = false;
 
   constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
     super(app);
     this.plugin = plugin;
     this.libraryId = plugin.settings.activeLibraryId;
     this.rating = String(plugin.settings.defaultRatingNumber);
+    this.overwriteOverride = plugin.settings.overwriteIfExists;
   }
 
   async onOpen() {
@@ -1121,6 +1139,13 @@ class CreateAuthorModal extends Modal {
       });
 
     new Setting(contentEl)
+      .setName("Overwrite Existing Author")
+      .addToggle(tg => {
+        tg.setValue(this.overwriteOverride)
+          .onChange(v => (this.overwriteOverride = v));
+      });
+
+    new Setting(contentEl)
       .addButton(btn => {
         btn.setButtonText("Create")
           .setCta()
@@ -1135,7 +1160,7 @@ class CreateAuthorModal extends Modal {
                 new Notice("Selected library not found.");
                 return;
               }
-              await this.plugin.createAuthorFromAudible(this.url, library, this.rating);
+              await this.plugin.createAuthorFromAudible(this.url, library, this.rating, this.overwriteOverride);
               this.close();
             } catch (e: any) {
               console.error(e);
@@ -1160,12 +1185,14 @@ class CreateSeriesModal extends Modal {
   url = "";
   libraryId = "";
   rating = "";
+  overwriteOverride = false;
 
   constructor(app: App, plugin: AudibleLibraryCreatorPlugin) {
     super(app);
     this.plugin = plugin;
     this.libraryId = plugin.settings.activeLibraryId;
     this.rating = String(plugin.settings.defaultRatingNumber);
+    this.overwriteOverride = plugin.settings.overwriteIfExists;
   }
 
   onOpen() {
@@ -1202,6 +1229,13 @@ class CreateSeriesModal extends Modal {
         t.inputEl.style.width = "100%";
       });
 
+    new Setting(contentEl)
+      .setName("Overwrite Existing Series")
+      .addToggle(tg => {
+        tg.setValue(this.overwriteOverride)
+          .onChange(v => (this.overwriteOverride = v));
+      });
+
     new Setting(contentEl).addButton(btn =>
       btn
         .setButtonText("Create Series Page")
@@ -1214,7 +1248,7 @@ class CreateSeriesModal extends Modal {
           const lib = this.plugin.settings.libraries.find(l => l.id === this.libraryId);
           if (!lib) return;
           this.close();
-          await this.plugin.createSeriesFromAudible(this.url, lib, this.rating);
+          await this.plugin.createSeriesFromAudible(this.url, lib, this.rating, this.overwriteOverride);
         })
     );
   }
@@ -1227,17 +1261,13 @@ class CreateSeriesModal extends Modal {
 // -------------------- plugin --------------------
 export default class AudibleLibraryCreatorPlugin extends Plugin {
   settings!: AudibleLibraryCreatorSettings;
+  ribbonIcons: HTMLElement[] = [];
 
   async onload() {
     console.log(`Audible Library Creator v${this.manifest.version} loading...`);
     await this.loadSettings();
 
-    this.addRibbonIcon("book-open", "Add Audible Book", () => {
-      new CreateBookModal(this.app, this).open();
-    });
-    this.addRibbonIcon("library", "Add Audible Series", () => {
-      new CreateSeriesModal(this.app, this).open();
-    });
+    this.refreshRibbonIcons();
 
     this.addCommand({
       id: "add-audible-book",
@@ -1260,6 +1290,33 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     this.addSettingTab(new AudibleLibraryCreatorSettingTab(this.app, this));
   }
 
+  refreshRibbonIcons() {
+    // Clear existing
+    this.ribbonIcons.forEach(icon => icon.remove());
+    this.ribbonIcons = [];
+
+    if (this.settings.showBookRibbonIcon) {
+      const icon = this.addRibbonIcon("book-open", "Add Audible Book", () => {
+        new CreateBookModal(this.app, this).open();
+      });
+      this.ribbonIcons.push(icon);
+    }
+
+    if (this.settings.showSeriesRibbonIcon) {
+      const icon = this.addRibbonIcon("library", "Add Audible Series", () => {
+        new CreateSeriesModal(this.app, this).open();
+      });
+      this.ribbonIcons.push(icon);
+    }
+
+    if (this.settings.showAuthorRibbonIcon) {
+      const icon = this.addRibbonIcon("user", "Add Audible Author", () => {
+        new CreateAuthorModal(this.app, this).open();
+      });
+      this.ribbonIcons.push(icon);
+    }
+  }
+
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
@@ -1274,7 +1331,8 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     statusOverride?: string,
     ratingOverride?: string,
     overwriteOverride?: boolean,
-    createAuthorPage?: boolean
+    createAuthorPage?: boolean,
+    createSeriesPage?: boolean
   ) {
     const s = this.settings;
     const booksRoot = safeNormalizePath(library.booksRoot);
@@ -1290,7 +1348,10 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     const data = await scrapeAudible(url, library, s, statusOverride, ratingOverride);
 
     // Automatic Author Page Creation
-    if (createAuthorPage && s.authorTemplatePath && data.authors?.length) {
+    const authorTplPath = s.authorTemplatePath;
+    const authorFolderPath = safeNormalizePath(library.authorsFolder);
+
+    if (createAuthorPage && authorTplPath && authorFolderPath && data.authors?.length) {
       for (const author of data.authors) {
         if (author.url) {
           const authorUrl = author.url.startsWith("http") ? author.url : `https://www.audible.com${author.url}`;
@@ -1299,6 +1360,16 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
       }
       // Change links to internal Obsidian links for the book note
       (data as any).authors_md_override = data.authors.map(a => `[[${a.name}]]`).join(",  \n");
+    }
+
+    // Automatic Series Page Creation
+    const seriesTplPath = s.seriesTemplatePath;
+    const seriesFolderPath = safeNormalizePath(library.seriesFolder);
+    if (createSeriesPage && seriesTplPath && seriesFolderPath && data.series?.url) {
+      const seriesUrl = data.series.url.startsWith("http") ? data.series.url : `https://www.audible.com${data.series.url}`;
+      await this.createSeriesFromAudible(seriesUrl, library);
+      // Change series field to internal link
+      data.series.name = `[[${data.series.name}]]`;
     }
 
     const tpl = await readTemplate(this.app, s.bookTemplatePath);
@@ -1334,15 +1405,25 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     }
   }
 
-  async createAuthorFromAudible(url: string, library: LibrarySettings, ratingOverride?: string) {
+  async createAuthorFromAudible(url: string, library: LibrarySettings, ratingOverride?: string, overwriteOverride?: boolean) {
     try {
+      const folderPath = safeNormalizePath(library.authorsFolder);
+      if (!folderPath) {
+        new Notice("Author folder not defined for this library. Author page creation skipped.");
+        return;
+      }
+
       new Notice("Scraping author...");
       const data = await scrapeAuthor(url, library, this.settings, ratingOverride);
       const templatePath = this.settings.authorTemplatePath;
+      if (!templatePath) {
+        new Notice("Author template path not defined. Author page creation skipped.");
+        return;
+      }
+
       const template = await readTemplate(this.app, templatePath);
       const content = renderFromTemplate(template, data);
 
-      const folderPath = safeNormalizePath(library.authorsFolder);
       const fileName = `${data.author}.md`;
       const filePath = `${folderPath}/${fileName}`;
 
@@ -1350,8 +1431,10 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
       if (!folder) await this.app.vault.createFolder(folderPath);
 
       const existing = this.app.vault.getAbstractFileByPath(filePath);
+      const shouldOverwrite = overwriteOverride ?? this.settings.overwriteIfExists;
+
       if (existing && existing instanceof TFile) {
-        if (!this.settings.overwriteIfExists) {
+        if (!shouldOverwrite) {
           new Notice("Author page already exists.");
           return;
         }
@@ -1372,16 +1455,26 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     }
   }
 
-  async createSeriesFromAudible(url: string, library: LibrarySettings, ratingOverride?: string) {
+  async createSeriesFromAudible(url: string, library: LibrarySettings, ratingOverride?: string, overwriteOverride?: boolean) {
     try {
+      const folderPath = safeNormalizePath(library.seriesFolder);
+      if (!folderPath) {
+        new Notice("Series folder not defined for this library. Series page creation skipped.");
+        return;
+      }
+
       new Notice("Scraping series...");
       const data = await scrapeSeriesPage(url, this.settings, library.name, ratingOverride);
 
       const tplPath = this.settings.seriesTemplatePath;
+      if (!tplPath) {
+        new Notice("Series template path not defined. Series page creation skipped.");
+        return;
+      }
+
       const tpl = await readTemplate(this.app, tplPath);
       const content = renderFromTemplate(tpl, data);
 
-      const folderPath = safeNormalizePath(library.seriesFolder);
       const fileName = `${normalizeTitle(data.series)}.md`;
       const filePath = `${folderPath}/${fileName}`;
 
@@ -1389,8 +1482,10 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
       if (!folder) await this.app.vault.createFolder(folderPath);
 
       const existing = this.app.vault.getAbstractFileByPath(filePath);
+      const shouldOverwrite = overwriteOverride ?? this.settings.overwriteIfExists;
+
       if (existing && existing instanceof TFile) {
-        if (!this.settings.overwriteIfExists) {
+        if (!shouldOverwrite) {
           new Notice("Series page already exists.");
           return;
         }

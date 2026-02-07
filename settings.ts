@@ -40,6 +40,9 @@ export interface AudibleLibraryCreatorSettings {
   allowHalfStars: boolean;
 
   // Features
+  showBookRibbonIcon: boolean;
+  showSeriesRibbonIcon: boolean;
+  showAuthorRibbonIcon: boolean;
 
   openCreatedFile: boolean;
   overwriteIfExists: boolean;
@@ -75,6 +78,9 @@ export const DEFAULT_SETTINGS: AudibleLibraryCreatorSettings = {
   ratingStyle: "classic",
   allowHalfStars: true,
 
+  showBookRibbonIcon: true,
+  showSeriesRibbonIcon: true,
+  showAuthorRibbonIcon: false,
 
   openCreatedFile: true,
   overwriteIfExists: false,
@@ -282,6 +288,7 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
 
       new Setting(libContainer)
         .setName("Authors folder")
+        .setDesc("Leave blank to not use Author Pages for this library.")
         .addText(t => {
           t.setValue(lib.authorsFolder);
           t.onChange(async v => {
@@ -292,6 +299,7 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
 
       new Setting(libContainer)
         .setName("Series folder")
+        .setDesc("Leave blank to not use Series Pages for this library.")
         .addText(t => {
           t.setValue(lib.seriesFolder);
           t.onChange(async v => {
@@ -449,6 +457,27 @@ export class AudibleLibraryCreatorSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
+
+    root.createEl("h4", { text: "Ribbon icons" });
+
+    const addRibbonToggle = (name: string, key: "showBookRibbonIcon" | "showSeriesRibbonIcon" | "showAuthorRibbonIcon") => {
+      new Setting(root)
+        .setName(`Show "${name}" ribbon icon`)
+        .addToggle(tg => {
+          tg.setValue(s[key]);
+          tg.onChange(async v => {
+            // @ts-ignore
+            this.plugin.settings[key] = v;
+            await this.plugin.saveSettings();
+            // Signal plugin to refresh ribbon icons
+            this.plugin.refreshRibbonIcons();
+          });
+        });
+    };
+
+    addRibbonToggle("Add Audible Book", "showBookRibbonIcon");
+    addRibbonToggle("Add Audible Series", "showSeriesRibbonIcon");
+    addRibbonToggle("Add Audible Author", "showAuthorRibbonIcon");
   }
 
   private renderTags(root: HTMLElement) {
