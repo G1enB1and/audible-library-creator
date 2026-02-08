@@ -709,6 +709,9 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData | SeriesPag
       ? (d.publisher.url ? `[${d.publisher.name}](${cleanUrl(d.publisher.url)})` : d.publisher.name)
       : "";
 
+    // For book notes, we want publisher to be just the name as per user request
+    const publisherForNote = publisherPlain;
+
     const tagsMd = d.tags.map((t: any) => `#${t}`).join(" ");
     const tagsYaml = "[" + d.tags.map((t: any) => JSON.stringify(t)).join(",") + "]";
 
@@ -719,7 +722,8 @@ function renderFromTemplate(tpl: string, data: BookData | AuthorData | SeriesPag
     rep("{{narrators_md}}", narratorsMd);
     rep("{{narrators_plain}}", narratorsPlain);
     rep("{{length}}", d.length ?? "");
-    rep("{{publisher}}", publisherMd);
+    rep("{{publisher}}", publisherForNote);
+    rep("{{publisher_md}}", publisherMd);
     rep("{{publisher_plain}}", publisherPlain);
     rep("{{release_date}}", d.releaseDate ?? "");
     rep("{{start_date}}", d.startDate ?? "");
@@ -1368,8 +1372,7 @@ export default class AudibleLibraryCreatorPlugin extends Plugin {
     if (createSeriesPage && seriesTplPath && seriesFolderPath && data.series?.url) {
       const seriesUrl = data.series.url.startsWith("http") ? data.series.url : `https://www.audible.com${data.series.url}`;
       await this.createSeriesFromAudible(seriesUrl, library);
-      // Change series field to internal link
-      data.series.name = `[[${data.series.name}]]`;
+      // Brackets are now handled in the template renderer to avoid YAML issues
     }
 
     const tpl = await readTemplate(this.app, s.bookTemplatePath);
